@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Where downloaded updates wait for the installer. -->
+    <cache-path name="updates" path="updates/" />
+    <!-- Where the chat's camera saves a photo until it has been prepared and sent. -->
+    <cache-path name="camera" path="camera/" />
+    <!-- "Export my data" writes a CSV here before it is shared. -->
+    <cache-path name="exports" path="exports/" />
+</paths>

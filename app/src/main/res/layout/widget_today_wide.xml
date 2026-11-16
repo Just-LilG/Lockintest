@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Today, 4x2: the ring with the share of the goal, today's time, what's next, and Lock in. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView android:id="@+id/bg" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:src="@drawable/widget_fill" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/glow" android:layout_width="180dp" android:layout_height="180dp"
+        android:layout_gravity="start|center_vertical" android:layout_marginStart="-22dp"
+        android:scaleType="fitXY" android:src="@drawable/widget_glow" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/sheen" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:src="@drawable/widget_sheen" android:importantForAccessibility="no" />
+    <ImageView android:id="@+id/rim" android:layout_width="match_parent" android:layout_height="match_parent"
+        android:scaleType="fitXY" android:src="@drawable/widget_rim" android:importantForAccessibility="no" />
+
+    <LinearLayout
+        android:layout_width="match_parent" android:layout_height="match_parent"
+        android:orientation="horizontal" android:gravity="center_vertical"
+        android:paddingStart="14dp" android:paddingEnd="14dp" android:paddingTop="12dp" android:paddingBottom="12dp">
+
+        <FrameLayout android:id="@+id/ring_area" android:layout_width="0dp" android:layout_height="match_parent"
+            android:layout_weight="0.4">
+            <ImageView android:id="@+id/ring" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:scaleType="fitCenter" />
+            <!-- fx -->
+            <ProgressBar android:id="@+id/fx_ring" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:indeterminate="true" android:indeterminateOnly="true" android:indeterminateDrawable="@drawable/w_fx_ring"
+                android:indeterminateTint="#FFFFFFFF" android:importantForAccessibility="no" />
+            <ProgressBar android:id="@+id/fx_done" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:indeterminate="true" android:indeterminateOnly="true" android:indeterminateDrawable="@drawable/w_fx_done"
+                android:indeterminateTint="#FFFFFFFF" android:importantForAccessibility="no" />
+            <!-- /fx -->
+            <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent"
+                android:orientation="vertical" android:gravity="center">
+                <ImageView android:id="@+id/ring_icon" android:layout_width="22dp" android:layout_height="22dp"
+                    android:src="@drawable/ic_w_lock" android:visibility="gone" android:importantForAccessibility="no" />
+                <TextView android:id="@+id/ring_big" style="@style/WidgetFigure" android:textSize="25sp"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                <TextView android:id="@+id/ring_sub" style="@style/WidgetSub" android:textSize="10.5sp"
+                    android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="2dp" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="0.6"
+            android:layout_marginStart="14dp" android:orientation="vertical">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="24dp"
+                android:orientation="horizontal" android:gravity="center_vertical">
+                <ImageView android:id="@+id/head_icon" android:layout_width="13dp" android:layout_height="13dp"
+                    android:src="@drawable/ic_w_lock" android:visibility="gone" android:layout_marginEnd="6dp"
+                    android:importantForAccessibility="no" />
+                <TextView android:id="@+id/head_label" style="@style/WidgetCap"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                    android:text="@string/widget_today_label" />
+                <FrameLayout android:id="@+id/chip" android:layout_width="wrap_content" android:layout_height="22dp">
+                    <ImageView android:id="@+id/chip_bg" android:layout_width="match_parent" android:layout_height="match_parent"
+                        android:scaleType="fitXY" android:src="@drawable/widget_pill" android:importantForAccessibility="no" />
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
+                        android:orientation="horizontal" android:gravity="center_vertical"
+                        android:paddingStart="6dp" android:paddingEnd="8dp">
+                        <ImageView android:id="@+id/chip_icon" android:layout_width="12dp" android:layout_height="12dp"
+                            android:src="@drawable/ic_w_flame" android:importantForAccessibility="no" />
+                        <TextView android:id="@+id/chip_text" style="@style/WidgetSub" android:textSize="11.5sp"
+                            android:fontVariationSettings="\'wght\' 600"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="3dp" />
+                    </LinearLayout>
+                </FrameLayout>
+            </LinearLayout>
+
+            <TextView android:id="@+id/big" style="@style/WidgetFigure"
+                android:layout_width="match_parent" android:layout_height="36dp" android:layout_marginTop="2dp"
+                android:gravity="center_vertical|start"
+                android:autoSizeTextType="uniform" android:autoSizeMinTextSize="18sp" android:autoSizeMaxTextSize="31sp"
+                android:autoSizeStepGranularity="1sp" />
+            <Chronometer android:id="@+id/clock" style="@style/WidgetFigure" android:textSize="30sp"
+                android:layout_width="wrap_content" android:layout_height="36dp" android:layout_marginTop="2dp"
+                android:gravity="center_vertical" android:visibility="gone" />
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="2dp">
+                <ImageView android:id="@+id/line_icon" android:layout_width="12dp" android:layout_height="12dp"
+                    android:layout_marginEnd="5dp" android:src="@drawable/ic_w_clock" android:importantForAccessibility="no" />
+                <TextView android:id="@+id/line_text" style="@style/WidgetSub"
+                    android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/actions" android:layout_width="match_parent" android:layout_height="34dp"
+                android:layout_marginTop="10dp" android:orientation="horizontal">
+                <FrameLayout android:id="@+id/primary" android:layout_width="0dp" android:layout_height="match_parent"
+                    android:layout_weight="1">
+                    <ImageView android:id="@+id/primary_bg" android:layout_width="match_parent" android:layout_height="match_parent"
+                        android:scaleType="fitXY" android:src="@drawable/widget_pill" android:importantForAccessibility="no" />
+                    <!-- fx -->
+                    <ProgressBar android:id="@+id/fx_shimmer" android:layout_width="match_parent" android:layout_height="match_parent"
+                android:indeterminate="true" android:indeterminateOnly="false" android:indeterminateDrawable="@drawable/w_fx_shimmer_pill"
+                android:indeterminateTint="#FFFFFFFF" android:importantForAccessibility="no" />
+                    <!-- /fx -->
+                    <LinearLayout android:layout_width="wrap_content" android:layout_height="match_parent"
+                        android:layout_gravity="center" android:orientation="horizontal" android:gravity="center_vertical">
+                        <ImageView android:id="@+id/primary_icon" android:layout_width="14dp" android:layout_height="14dp"
+                            android:layout_marginEnd="6dp" android:src="@drawable/ic_w_lock" android:importantForAccessibility="no" />
+                        <TextView android:id="@+id/primary_text" style="@style/WidgetButton"
+                            android:layout_width="wrap_content" android:layout_height="wrap_content" />
+                    </LinearLayout>
+                </FrameLayout>
+                <FrameLayout android:id="@+id/ghost" android:layout_width="34dp" android:layout_height="match_parent"
+                    android:layout_marginStart="8dp">
+                    <ImageView android:id="@+id/ghost_rim" android:layout_width="match_parent" android:layout_height="match_parent"
+                        android:scaleType="fitXY" android:src="@drawable/widget_pill_rim" android:importantForAccessibility="no" />
+                    <ImageView android:id="@+id/ghost_icon" android:layout_width="16dp" android:layout_height="16dp"
+                        android:layout_gravity="center" android:src="@drawable/ic_w_chat" />
+                </FrameLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

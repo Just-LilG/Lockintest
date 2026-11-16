@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A faint light across a widget's card from its top left, tinted and faded in code. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient android:type="linear" android:angle="315" android:startColor="#FFFFFFFF" android:centerColor="#00FFFFFF" android:endColor="#00FFFFFF" />
+    <corners android:radius="@dimen/widget_radius" />
+</shape>

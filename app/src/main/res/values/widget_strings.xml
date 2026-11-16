@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_today_label">Today</string>
+    <string name="widget_today_about">Today\'s focus against your goal, your streak, and a countdown while you\'re locked.</string>
+    <string name="widget_rope_label">Roped</string>
+    <string name="widget_rope_about">You and your partner climbing today\'s goal, with locks between you.</string>
+    <string name="widget_week_label">This week</string>
+    <string name="widget_week_best">Best day</string>
+    <string name="widget_week_about">Your week day by day against your goal, with your streak.</string>
+    <string name="guard_label">LockIn protection</string>
+    <string name="guard_description">Switching off or removing LockIn needs your partner\'s OK. This only looks at Settings screens for that and nothing leaves your phone.</string>
+</resources>

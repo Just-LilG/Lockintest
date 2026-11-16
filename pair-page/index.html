@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0B0F14">
+<title>Lock in with me on LockIn</title>
+<style>
+  :root { --ink:#0B0F14; --slate:#141A22; --graphite:#222B36; --mist:#7C8896; --silver:#A9B3BF; --snow:#F4F7FA; --lime:#C6F432; --onlime:#10170A; --wash:#1B2610; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--ink); color: var(--snow); font-family: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { min-height: 100svh; max-width: 460px; margin: 0 auto; padding: 40px 24px 32px; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
+  .brand { font-weight: 800; letter-spacing: .02em; color: var(--lime); font-size: 18px; }
+  h1 { font-size: 36px; line-height: 1.08; margin: 0; letter-spacing: -.02em; font-weight: 800; }
+  p { margin: 0; color: var(--silver); font-size: 17px; line-height: 1.45; }
+  .code { background: var(--slate); border: 1px solid var(--graphite); border-radius: 24px; padding: 20px; }
+  .code small { color: var(--mist); font-size: 14px; display: block; margin-bottom: 6px; }
+  .code b { font-size: 34px; letter-spacing: .14em; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .btn { display: block; width: 100%; text-align: center; text-decoration: none; border: 0; cursor: pointer; font: inherit; font-weight: 700; font-size: 17px; border-radius: 999px; padding: 17px 20px; transition: transform .12s ease; }
+  .btn:active { transform: scale(.97); }
+  .primary { background: var(--lime); color: var(--onlime); }
+  .outline { background: transparent; color: var(--snow); box-shadow: inset 0 0 0 1.5px #39444F; }
+  ol { margin: 0; padding-left: 22px; color: var(--silver); font-size: 16px; line-height: 1.6; }
+  .note { background: var(--wash); border-radius: 18px; padding: 14px 16px; color: var(--snow); font-size: 15px; display: none; }
+  .note.show { display: block; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">LockIn</div>
+
+  <section id="ok" hidden>
+    <h1>Someone wants to lock in with you.</h1>
+    <p style="margin-top:12px">Pair up, then lock each other's phones while you study. Pairing takes a few seconds.</p>
+    <div class="code" style="margin:22px 0">
+      <small>Invite code</small>
+      <b id="code"></b>
+    </div>
+    <a id="open" class="btn primary" href="#">Open in LockIn</a>
+    <button id="copy" class="btn outline" style="margin-top:10px" type="button">Copy the code</button>
+    <div id="noapp" class="note" style="margin-top:14px">LockIn doesn't seem to be installed on this phone yet. Install it, then tap the link again, or enter the code in the app under Partner.</div>
+    <div id="notandroid" class="note" style="margin-top:14px">LockIn is an Android app for now. Open this link on an Android phone.</div>
+    <h2 style="font-size:18px;margin:26px 0 8px">Or do it by hand</h2>
+    <ol>
+      <li>Open LockIn and sign in.</li>
+      <li>Go to the Partner tab.</li>
+      <li>Type the code above, or scan their QR code.</li>
+    </ol>
+  </section>
+
+  <section id="bad" hidden>
+    <h1>That link looks incomplete.</h1>
+    <p style="margin-top:12px">Ask your partner to send the invite again from LockIn: Partner, then Share. Invite codes also stop working after 24 hours.</p>
+  </section>
+</main>
+<script>
+(function () {
+  var part = location.pathname.split('/').filter(Boolean);
+  var raw = part[0] === 'join' ? (part[1] || '') : '';
+  var code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  // Codes never contain 0, 1, I or O.
+  var valid = /^[A-HJ-NP-Z2-9]{8}$/.test(code);
+  document.getElementById(valid ? 'ok' : 'bad').hidden = false;
+  if (!valid) return;
+
+  document.getElementById('code').textContent = code.slice(0, 4) + ' ' + code.slice(4);
+  var android = /Android/i.test(navigator.userAgent);
+  var back = location.origin + '/join/' + code + '?installed=0';
+  var appLink = 'lockin://pair/' + code;
+  var open = document.getElementById('open');
+  open.href = android
+    ? 'intent://pair/' + code + '#Intent;scheme=lockin;package=com.godbless.lockin;S.browser_fallback_url=' + encodeURIComponent(back) + ';end'
+    : appLink;
+
+  if (location.search.indexOf('installed=0') >= 0) document.getElementById('noapp').classList.add('show');
+  else if (!android) document.getElementById('notandroid').classList.add('show');
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this;
+    function done() { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy the code'; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, done);
+    else done();
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The widgets' type: Archivo for figures, Figtree for words (the app's own fonts). Colours are set in code. -->
+    <style name="WidgetFigure">
+        <item name="android:fontFamily">@font/archivo</item>
+        <item name="android:fontVariationSettings">\'wght\' 800, \'wdth\' 105</item>
+        <item name="android:letterSpacing">-0.01</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textColor">#FFFFFFFF</item>
+    </style>
+    <style name="WidgetCap">
+        <item name="android:fontFamily">@font/figtree</item>
+        <item name="android:fontVariationSettings">\'wght\' 600</item>
+        <item name="android:textSize">10.5sp</item>
+        <item name="android:letterSpacing">0.14</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">#FF8B8B93</item>
+    </style>
+    <style name="WidgetSub">
+        <item name="android:fontFamily">@font/figtree</item>
+        <item name="android:fontVariationSettings">\'wght\' 500</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">#FFA6A6AE</item>
+    </style>
+    <style name="WidgetButton">
+        <item name="android:fontFamily">@font/figtree</item>
+        <item name="android:fontVariationSettings">\'wght\' 600</item>
+        <item name="android:textSize">13.5sp</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:ellipsize">end</item>
+        <item name="android:includeFontPadding">false</item>
+        <item name="android:textColor">#FF0B0B0C</item>
+    </style>
+</resources>

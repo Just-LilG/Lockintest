@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.godbless.lockin",
+      "sha256_cert_fingerprints": [
+        "54:C3:D4:01:E4:3C:6A:E5:EF:33:B4:00:9A:BF:2A:2B:5E:60:EA:5D:4D:5E:5F:DA:37:2F:45:10:24:5A:FC:8A"
+      ]
+    }
+  }
+]

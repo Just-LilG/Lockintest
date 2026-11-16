@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A soft light behind a widget's main figure, coloured with the accent in code. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
+    <gradient
+        android:type="radial"
+        android:gradientRadius="50%p"
+        android:startColor="#FFFFFFFF"
+        android:centerColor="#55FFFFFF"
+        android:endColor="#00FFFFFF" />
+</shape>

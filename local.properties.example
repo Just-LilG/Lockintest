@@ -1,0 +1,2 @@
+# Android Studio creates local.properties for you. If you build from the command line, copy this to local.properties:
+sdk.dir=/path/to/Android/Sdk

@@ -1,0 +1,267 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Scans your partner's QR code. Pairing by typing the code works without it. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Lets LockIn bring itself back to the front if someone leaves during a session. -->
+    <!-- Ends a limited app's process once it is out of sight (a limit that is up shouldn't leave it running behind). -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Keeps a session alive while the screen is off. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Shows your partner's messages and nudges when LockIn is closed (Android 13 and up asks first). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Reads how long each app was open, to show your partner and to hold the limits they set. The person turns it on in Settings. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
+    <!-- The guard service keeps running in the background to do that. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Voice messages in the chats. Asked for the first time you hold the mic. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Starts a lock your partner scheduled, and session reminders, on the minute (Android 12+ asks the person first). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Installs the new version when you tap Update (Android asks you to allow this once). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- Lets LockIn see which apps have an icon (to name them), which is the apps that count, without asking for every installed app. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.SETTINGS" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".LockInApplication"
+        android:appComponentFactory="com.godbless.lockin.dyn.DynFactory"
+        tools:replace="android:appComponentFactory"
+        tools:targetApi="28"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LockIn.Starting">
+
+        <!-- Pushes Android shows by itself while LockIn sleeps: LockIn's icon, lime, and the Locks channel when
+             the server names none. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_lockin" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/lockin_lime" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="partner_locks" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- The confirmation link in the email opens the app here. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lockin" android:host="auth" android:path="/callback" />
+            </intent-filter>
+
+            <!-- A pairing link opens the app here: the app link, and the web link (host must match PairLink.Host). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="lockin" android:host="pair" />
+            </intent-filter>
+            <!-- autoVerify: Android checks lockin.secrets.quest/.well-known/assetlinks.json, then opens these links in LockIn with no chooser. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="lockin.secrets.quest" android:pathPrefix="/join/" />
+            </intent-filter>
+        </activity>
+
+        <!-- Asks Google Play services to download the QR scanner when LockIn is installed, so it is ready before the first scan. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
+
+        <!-- Receives pushes from Firebase. -->
+        <service
+            android:name=".push.LockInMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- The guard: holds back the Settings screens that would switch LockIn off until the partner says yes. -->
+        <service
+            android:name=".lock.SettingsGuardService"
+            android:exported="false"
+            android:label="@string/guard_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/settings_guard_config" />
+        </service>
+
+        <!-- Holds your partner's app limits and reports app times while LockIn is closed. -->
+        <service
+            android:name=".usage.GuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Watches which app is open to enforce daily app limits a partner set, and reports app times to that partner." />
+        </service>
+
+        <!-- The buttons on notifications: reply, mark read, unlock, not yet. Only LockIn's own notifications send these. -->
+        <receiver
+            android:name=".push.NotifyActionReceiver"
+            android:exported="false" />
+
+        <!-- Holds a partner's lock while LockIn is closed: covers other apps, checks in with the server, and
+             tells the partner if something tries to get around it. -->
+        <service
+            android:name=".lock.LockService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Enforces a focus lock the user agreed to let their study partner set: covers other apps until the lock ends, while calls and the emergency dialer stay available." />
+        </service>
+
+        <!-- Right after a restart, before the first unlock: if a lock is on, the boot watcher brings it back the
+             moment the phone is unlocked (Android's normal "started" signal can come a minute or more later). -->
+        <receiver
+            android:name=".lock.EarlyBootReceiver"
+            android:directBootAware="true"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+        <service
+            android:name=".lock.BootGate"
+            android:directBootAware="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Right after a restart, waits for the first unlock so a focus lock the user agreed to resumes at once." />
+        </service>
+
+        <!-- Starts the guard again after the phone restarts, and re-arms a partner's scheduled or running lock. -->
+        <receiver
+            android:name=".usage.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The "limit reached" screen that covers an app whose time is used up. -->
+        <activity
+            android:name=".usage.BlockActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:resizeableActivity="false"
+            android:supportsPictureInPicture="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:theme="@style/Theme.LockIn" />
+
+        <!-- Makes LockIn a device admin: it can lock the screen and cannot be uninstalled until switched off. -->
+        <receiver
+            android:name=".lock.LockAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
+                <action android:name="android.app.action.DEVICE_ADMIN_DISABLED" />
+            </intent-filter>
+        </receiver>
+    
+        <!-- Restarts the app after a code update, from its own small process. -->
+        <activity
+            android:name=".dyn.RestartActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:process=":restart"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- Hands a downloaded update to the installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+        <receiver
+            android:name=".push.PlanReminderReceiver"
+            android:exported="false" />
+
+        <!-- Home-screen widgets: Today, Roped and This week (see widget/LockInWidgets.kt). -->
+        <receiver
+            android:name=".widget.TodayWidget"
+            android:exported="false"
+            android:label="@string/widget_today_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_today_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.RopeWidget"
+            android:exported="false"
+            android:label="@string/widget_rope_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_rope_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.WeekWidget"
+            android:exported="false"
+            android:label="@string/widget_week_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_week_info" />
+        </receiver>
+    </application>
+</manifest>
