@@ -84,12 +84,48 @@ internal fun Avatar(
     boxSize: androidx.compose.ui.unit.Dp = 46.dp,
     filled: Boolean = false,
     ring: Color = LockInColors.Slate,
-    /** A chosen colour (your own avatar) and a symbol to show instead of the initial. */
+    /** A chosen colour and a symbol to show instead of the initial (the classic look). */
     tint: Color? = null,
     glyph: String? = null,
+    /** This is you: your own avatar choice (illustrated, or colour and symbol) is used. */
+    me: Boolean = false,
+    /** Picker preview only: show this style ("" for classic) and shuffle code instead of the saved ones. */
+    previewStyle: String? = null,
+    previewSeed: String? = null,
 ) {
-    val bg = tint ?: if (filled) LockInColors.Snow else LockInColors.Graphite
-    val fg = if (tint != null) LockInColors.Ink else if (filled) LockInColors.Ink else LockInColors.Snow
+    // You get what you picked. Everyone else is drawn from what the server says they picked (AvatarBook), or by DiceBear's
+    // default style from a hash of their first name if they never chose.
+    var style: String
+    var seed = DiceBear.seedFor(letter)
+    var useTint = tint
+    var useGlyph = glyph
+    if (me) {
+        style = previewStyle ?: Identity.avatarStyle
+        seed = (previewSeed ?: Identity.avatarSeed).ifBlank { seed }
+        if (previewStyle == null) {
+            useTint = tint ?: Identity.tint
+            useGlyph = glyph ?: Identity.glyph
+        }
+    } else if (tint == null && glyph == null) {
+        val spec = com.godbless.lockin.data.AvatarBook[letter]
+        val specStyle = spec?.style
+        if (spec == null || specStyle == null) {
+            style = DiceBear.DefaultStyle
+        } else if (specStyle.isEmpty()) {
+            style = ""
+            useTint = AvatarColors.getOrNull(spec.color)
+            useGlyph = spec.glyph.ifBlank { null }
+        } else {
+            // Only styles this app knows are drawn; anything else (a newer app's style) falls back to the default.
+            style = if (DiceBear.Styles.any { it.first == specStyle }) specStyle else DiceBear.DefaultStyle
+            seed = spec.seed.ifBlank { seed }
+        }
+    } else {
+        style = ""
+    }
+    val art = if (style.isNotEmpty()) rememberDiceBear(style, seed) else null
+    val bg = useTint ?: if (filled) LockInColors.Snow else LockInColors.Graphite
+    val fg = if (useTint != null) LockInColors.Ink else if (filled) LockInColors.Ink else LockInColors.Snow
     Box(
         modifier
             .size(boxSize)
@@ -100,7 +136,17 @@ internal fun Avatar(
             .background(bg),
         contentAlignment = Alignment.Center,
     ) {
-        Text(glyph ?: letter.firstGlyph(), style = LockInText.Title.copy(fontSize = (boxSize.value * 0.4f).sp, color = fg))
+        if (art != null) {
+            androidx.compose.foundation.Image(
+                bitmap = art,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            // The letter shows while the picture loads, and stays if it can't be fetched (offline).
+            Text(useGlyph ?: letter.firstGlyph(), style = LockInText.Title.copy(fontSize = (boxSize.value * 0.4f).sp, color = fg))
+        }
     }
 }
 
@@ -271,9 +317,12 @@ private val DayNames = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Fri
  */
 @Composable
 internal fun WeekRange(values: FloatArray, today: Int, goalHours: Float, modifier: Modifier = Modifier, visible: Boolean = true, partner: FloatArray? = null) {
-    val grow = remember { Animatable(0f) }
+    // The bars rise the first time the card scrolls into view in this run of the app; after that they are just there.
+    val grow = remember { Animatable(if (HomeIntro.weekGrown) 1f else 0f) }
     LaunchedEffect(visible) {
         if (!visible) return@LaunchedEffect
+        if (grow.value >= 1f) return@LaunchedEffect
+        HomeIntro.weekGrown = true
         delay(150)
         grow.animateTo(1f, tween(1300, easing = UiGlide))
     }
@@ -510,7 +559,7 @@ internal fun RecentClimbs(climbs: List<Climb>, modifier: Modifier = Modifier, vi
             if (i > 0) Box(Modifier.fillMaxWidth().padding(start = 76.dp).height(1.dp).background(LockInColors.Graphite))
             val byPartner = c.title.startsWith("Locked by ")
             // Each row slides in from the right, one after the other, when the list scrolls into view.
-            val slide = rememberSlideIn(visible, i)
+            val slide = rememberSlideIn(visible, i, key = "recent-$i")
             Row(
                 Modifier
                     .fillMaxWidth()

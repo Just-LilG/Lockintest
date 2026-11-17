@@ -72,6 +72,9 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.BaselineShift
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -462,7 +465,7 @@ private fun LcdInput(text: String, cursor: Int, showCaret: Boolean, ink: Color, 
     }
     Box(Modifier.fillMaxWidth().onSizeChanged { viewport = it.width }.horizontalScroll(scroll)) {
         Text(
-            text.ifEmpty { " " },
+            remember(text) { styledSum(text.ifEmpty { " " }) },
             style = LockInText.Title.copy(color = ink, fontSize = 25.sp, lineHeight = 32.sp),
             maxLines = 1,
             softWrap = false,
@@ -482,6 +485,34 @@ private fun LcdInput(text: String, cursor: Int, showCaret: Boolean, ink: Color, 
                     }
                 },
         )
+    }
+}
+
+private val fractionInSum = Regex("(\\d+(?:\\.\\d+)?)/(\\d+(?:\\.\\d+)?)")
+
+/**
+ * The sum as drawn on the input line. A number typed over a number (the a/b key, or 3/4 pasted) is drawn raised over
+ * lowered around a fraction slash, not as a plain ÷; any other / is drawn as ÷. The text keeps its length, so the
+ * caret and taps still line up with the real sum.
+ */
+private fun styledSum(text: String): AnnotatedString {
+    val shown = StringBuilder(text)
+    val raised = ArrayList<IntRange>()
+    val lowered = ArrayList<IntRange>()
+    for (m in fractionInSum.findAll(text)) {
+        val top = m.groups[1]!!.range
+        val bottom = m.groups[2]!!.range
+        raised += top
+        lowered += bottom
+        shown.setCharAt(top.last + 1, '⁄')
+    }
+    for (i in text.indices) {
+        if (text[i] == '/' && shown[i] == '/' && !text.startsWith("d/dx(", i - 1)) shown.setCharAt(i, '÷')
+    }
+    return buildAnnotatedString {
+        append(shown.toString())
+        for (r in raised) addStyle(SpanStyle(fontSize = 17.sp, baselineShift = BaselineShift(0.45f)), r.first, r.last + 1)
+        for (r in lowered) addStyle(SpanStyle(fontSize = 17.sp, baselineShift = BaselineShift(-0.2f)), r.first, r.last + 1)
     }
 }
 

@@ -104,7 +104,7 @@ private val SessionStarts = listOf("Now" to 0, "15m" to 15, "30m" to 30, "1h" to
  */
 @Composable
 internal fun CrewTab(crew: CrewState, onOpenChat: () -> Unit) {
-    PageScaffold(wide = true) { entrance ->
+    PageScaffold(wide = true, key = "tab-crew") { entrance ->
         val c = crew.crew
         AnimatedContent(
             targetState = when {
@@ -803,8 +803,7 @@ private fun Board(c: Crew, state: CrewState, range: Int, modifier: Modifier = Mo
                     m.name,
                     boxSize = 34.dp,
                     filled = you,
-                    tint = if (you) Identity.tint else null,
-                    glyph = if (you) Identity.glyph else null,
+                    me = you,
                 )
                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

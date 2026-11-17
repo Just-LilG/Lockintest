@@ -530,7 +530,9 @@ internal fun ReaderScreen(
             }
         }
 
-        // Top bar
+        // Top bar. Its fade takes the paper colour, so it blends into the page instead of a black smear.
+        val fade = when (tone) { 1 -> Color.Black; 2 -> Color(0xFFF4EBD6); else -> Color.White }
+        val titleColor = if (tone == 1) Color(0xFFF2F2F2) else Color(0xFF1C1A16)
         AnimatedVisibility(
             visible = chrome || doc == null,
             enter = slideInVertically(tween(240, easing = UiGlide)) { -it },
@@ -539,14 +541,14 @@ internal fun ReaderScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(0f to LockInColors.Ink.copy(alpha = 0.96f), 0.62f to LockInColors.Ink.copy(alpha = 0.88f), 1f to Color.Transparent))
+                .background(Brush.verticalGradient(0f to fade.copy(alpha = 0.96f), 0.62f to fade.copy(alpha = 0.88f), 1f to fade.copy(alpha = 0f)))
                 .padding(start = 16.dp, end = 16.dp, top = topPad, bottom = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton(onBack)
             Text(
                 book?.title ?: "",
-                style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp),
+                style = LockInText.Label.copy(color = titleColor, fontSize = 16.sp),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = 14.dp),

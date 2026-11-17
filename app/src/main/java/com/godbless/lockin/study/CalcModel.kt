@@ -73,7 +73,7 @@ internal object CalcKeys {
 
     val SciRows = listOf(
         listOf(
-            CalcKeyDef("a/b", "÷", alpha = L("÷R", "divr("), spoken = "fraction"),
+            CalcKeyDef("a/b", "/", alpha = L("÷R", "divr("), spoken = "fraction"),
             CalcKeyDef("√x", "√(", shift = L("∛x", "∛("), alpha = L("mod", " mod "), second = L("Int", "int("), spoken = "square root"),
             CalcKeyDef("x²", "²", shift = L("x³", "³"), alpha = L("z", "z"), second = L("Frac", "frac("), spoken = "squared"),
             CalcKeyDef("xʸ", "^", shift = L("ˣ√y", "ˣ√"), second = L("Sign", "sign("), spoken = "power"),
@@ -228,7 +228,7 @@ internal class CalcModel {
 
     // ---- Typing ------------------------------------------------------------------------------
 
-    private val carryOn = setOf("+", "−", "×", "÷", "^", "!", "%", "²", "³", "⁻¹", "ˣ√", " mod ", "P", "C")
+    private val carryOn = setOf("+", "−", "×", "÷", "/", "^", "!", "%", "²", "³", "⁻¹", "ˣ√", " mod ", "P", "C")
 
     /** Pieces that DEL and the arrows treat as one. Longest first. */
     private val tokens = listOf(
@@ -260,10 +260,10 @@ internal class CalcModel {
         if (promptKind == 3 || promptKind == 4) promptKind = 0
     }
 
-    fun type(text: String) {
+    fun type(text: String, fresh: Boolean = false) {
         if (text.isEmpty()) return
         if (done) {
-            val keep = text in carryOn
+            val keep = !fresh && text in carryOn
             leaveAnswer()
             expr = if (keep) "Ans$text" else text
             cursor = expr.length
@@ -433,9 +433,26 @@ internal class CalcModel {
             KeyAct.Compare -> return Req.Compare
             KeyAct.Copy -> return Req.Copy
             KeyAct.Paste -> return Req.Paste
-            else -> type(l.insert)
+            else -> when {
+                // (−) is a sign, not the minus operator: after an answer it starts a new number (−5), it does not carry on from Ans.
+                l.label == "(−)" && l.insert == "−" -> type("−", fresh = true)
+                l.label == "×10ˣ" && l.insert == "E" -> typeExp()
+                else -> type(l.insert)
+            }
         }
         return Req.None
+    }
+
+    /**
+     * The ×10ˣ key. A bare "E" is the variable E (0), so after an answer it carries on as Ans×10^ and
+     * with nothing before it (or after an operator or bracket) it means 1E, so "×10ˣ 3" is 1000.
+     */
+    private fun typeExp() {
+        if (done) { type("Ans×10^"); return }
+        val before = expr.substring(0, cursor.coerceIn(0, expr.length))
+        val last = before.lastOrNull()
+        val afterNumber = last != null && (last.isDigit() || last == '.' || last == ')' || last == 'π' || last == '²' || last == '³')
+        type(if (afterNumber) "E" else "1E")
     }
 
     /** The next ° ′ ″ mark: 12 then ° then 30 then ′ then 15 then ″. */
@@ -529,6 +546,9 @@ internal class CalcModel {
             promptKind == 3 || promptKind == 4 -> { restartPrompt(); return }
         }
         if (expr.isBlank()) return
+        // Already an answer: = again leaves it alone. Re-reading the shown (rounded) text would lose digits
+        // and the exact form (1÷3 = = × 3 gave 0.9999999999999).
+        if (done) return
         try {
             if (cmplx) {
                 val c = evalComplex(expr)
@@ -733,7 +753,7 @@ internal class CalcModel {
 
     /** What the input line shows: the sum being typed, or the finished sum with an "=" after it. */
     val inputText: String
-        get() = if (done) (if (promptKind == 3 || promptKind == 4) promptExpr else lastExpr) + " =" else expr
+        get() = if (done) (if (promptKind == 3 || promptKind == 4) promptExpr else lastExpr) else expr
 
     val inputCursor: Int
         get() = if (done) inputText.length else cursor.coerceIn(0, expr.length)
@@ -810,11 +830,22 @@ internal class CalcModel {
 
     /** Pastes text from the clipboard, keeping only what a sum can use. */
     fun pasteText(text: String) {
-        val ok = text.filter { it.isLetterOrDigit() || it in ".,+-−×÷*/^()%!π∞°'\"²³ " }.trim()
+        val ok = tidyPaste(text.take(1000).filter { it.isLetterOrDigit() || it in ".,+-−×÷*/^()%!π∞°'\"²³ " }.trim())
         if (ok.isEmpty()) return
         checkpoint()
-        type(ok.replace(',', '.'))
+        type(ok)
         refresh()
+    }
+
+    /**
+     * 1,000 and 12,345.5 are thousands separators (not decimal points), 3,14 is a decimal comma, and the
+     * comma in gcd(12,18) stays a comma. Spaces inside digit groups (1 000) are thousands separators too.
+     */
+    private fun tidyPaste(t: String): String {
+        var s = Regex("""(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])""").replace(t) { it.value.replace(",", "") }
+        s = Regex("""(?<![\d.,])\d{1,3}(?: \d{3})+(?![\d,])""").replace(s) { it.value.replace(" ", "") }
+        if ('(' !in s && '.' !in s && s.count { it == ',' } == 1 && Regex("""\d,\d""").containsMatchIn(s)) s = s.replace(',', '.')
+        return s
     }
 
     /** Redraws an answer after a setting changed (format, polar or rectangular). */

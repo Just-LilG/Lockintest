@@ -60,7 +60,7 @@ internal fun YouPage(
         Ranks.last { it.second <= alt % top }.first + if (ranges > 0) " · Range ${ranges + 1}" else ""
     }
 
-    PageScaffold(wide = true) { entrance ->
+    PageScaffold(wide = true, key = "tab-you") { entrance ->
         Spacer(Modifier.height(10.dp))
         ProfileHeader(
             name = you.displayName,

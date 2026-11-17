@@ -30,7 +30,18 @@ internal object Identity {
         private set
     var avatarGlyph by mutableStateOf("")
         private set
+    /** A DiceBear style for your illustrated avatar, or "" for the classic colour-and-symbol one. */
+    var avatarStyle by mutableStateOf(DiceBear.DefaultStyle)
+        private set
+    /** The shuffle code for your illustrated avatar; blank means the one your name gives. */
+    var avatarSeed by mutableStateOf("")
+        private set
     private val nicks = mutableStateMapOf<String, String>()
+
+    /** Set by the Home screen: sends a change to the server so your partner and crew see it. */
+    var syncUp: ((com.godbless.lockin.data.AvatarSpec) -> Unit)? = null
+
+    fun spec() = com.godbless.lockin.data.AvatarSpec(avatarStyle, avatarSeed, avatarColor, avatarGlyph)
 
     val tint: Color? get() = AvatarColors.getOrNull(avatarColor)
     val glyph: String? get() = avatarGlyph.ifBlank { null }
@@ -41,13 +52,55 @@ internal object Identity {
         prefs = p
         avatarColor = p.getInt("avatar_color", -1)
         avatarGlyph = p.getString("avatar_glyph", "").orEmpty()
+        // Someone who already chose a colour or symbol keeps it; everyone else gets the illustrated avatar.
+        avatarStyle = p.getString("avatar_style", null) ?: if (avatarColor >= 0 || avatarGlyph.isNotBlank()) "" else DiceBear.DefaultStyle
+        avatarSeed = p.getString("avatar_seed", "").orEmpty()
         p.all.forEach { (k, v) -> if (k.startsWith("nick_") && v is String && v.isNotBlank()) nicks[k.removePrefix("nick_")] = v }
     }
 
-    fun setAvatar(color: Int, glyph: String) {
+    fun setAvatar(color: Int, glyph: String, style: String = avatarStyle, seed: String = avatarSeed) {
         avatarColor = color
         avatarGlyph = glyph
-        prefs?.edit()?.putInt("avatar_color", color)?.putString("avatar_glyph", glyph)?.apply()
+        avatarStyle = style
+        avatarSeed = seed
+        // "dirty" stays set until the server has it, so a later refresh can't overwrite a change that didn't go through.
+        prefs?.edit()?.putInt("avatar_color", color)?.putString("avatar_glyph", glyph)
+            ?.putString("avatar_style", style)?.putString("avatar_seed", seed)?.putBoolean("avatar_dirty", true)?.apply()
+        syncUp?.invoke(spec())
+    }
+
+    /** Someone signed out: the next person on this phone starts from their own avatar, not this one's. */
+    fun reset() {
+        avatarColor = -1
+        avatarGlyph = ""
+        avatarStyle = DiceBear.DefaultStyle
+        avatarSeed = ""
+        prefs?.edit()?.remove("avatar_color")?.remove("avatar_glyph")?.remove("avatar_style")?.remove("avatar_seed")
+            ?.remove("avatar_dirty")?.apply()
+    }
+
+    /** The server has the avatar this phone sent. */
+    fun markPushed() { prefs?.edit()?.putBoolean("avatar_dirty", false)?.apply() }
+
+    /**
+     * Your avatar as the server has it. If you picked one (on this phone or another), it follows your account. If
+     * this phone has a pick the server hasn't got yet (made offline, or before avatars were saved), it is sent up.
+     */
+    fun adopt(server: com.godbless.lockin.data.AvatarSpec?) {
+        if (server == null) return
+        val dirty = prefs?.getBoolean("avatar_dirty", false) == true
+        val localChoice = prefs?.contains("avatar_style") == true || avatarColor >= 0 || avatarGlyph.isNotBlank()
+        val serverStyle = server.style
+        if (dirty || (serverStyle == null && localChoice)) {
+            syncUp?.invoke(spec())
+        } else if (serverStyle != null) {
+            avatarColor = server.color
+            avatarGlyph = server.glyph
+            avatarStyle = serverStyle
+            avatarSeed = server.seed
+            prefs?.edit()?.putInt("avatar_color", avatarColor)?.putString("avatar_glyph", avatarGlyph)
+                ?.putString("avatar_style", avatarStyle)?.putString("avatar_seed", avatarSeed)?.apply()
+        }
     }
 
     /** What you call your partner, or null to use the name they chose. */

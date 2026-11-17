@@ -373,4 +373,71 @@ class CalcModelTest {
         assertEquals(Req.Compare, m.press(key("x⁻¹")))
         assertTrue(describeKey(key("x⁻¹")).any { it.second.contains("True or False") })
     }
+    // ---- 0.28.1 regressions ----
+
+    @Test fun negativeKeyAfterAnswerStartsNewNumber() {
+        val m = CalcModel()
+        m.tap("2", "+", "3", "=", "(−)", "5", "=")
+        assertEquals("-5", m.resultText())
+        // the minus operator still carries on from the answer
+        val n = CalcModel()
+        n.tap("2", "+", "3", "=", "−", "1", "=")
+        assertEquals("4", n.resultText())
+        // and (−) then Ans is minus the answer
+        val k = CalcModel()
+        k.tap("5", "=", "(−)", "Ans", "=")
+        assertEquals("-5", k.resultText())
+    }
+
+    @Test fun equalsAgainKeepsTheExactAnswer() {
+        val m = CalcModel()
+        m.tap("1", "÷", "3", "=", "=", "×", "3", "=")
+        assertEquals("1", m.resultText())
+        val n = CalcModel()
+        n.tap("1", "÷", "3", "=", "=")
+        assertEquals("1/3", n.resultText())
+        assertEquals("1÷3", n.lastExpr)
+    }
+
+    @Test fun timesTenKeyNeverTypesTheVariableE() {
+        val m = CalcModel()
+        m.tap("5", "=", "×10ˣ", "2", "=")
+        assertEquals("500", m.resultText())
+        val n = CalcModel()
+        n.tap("×10ˣ", "3", "=")
+        assertEquals("1000", n.resultText())
+        val k = CalcModel()
+        k.tap("2", "×10ˣ", "3", "+", "1", "=")
+        assertEquals("2001", k.resultText())
+    }
+
+    @Test fun pasteHandlesSeparators() {
+        fun pasted(t: String) = CalcModel().also { it.pasteText(t) }.expr
+        assertEquals("1000+1", pasted("1,000+1"))
+        assertEquals("12345.5+1", pasted("12,345.5+1"))
+        assertEquals("1234567", pasted("1,234,567"))
+        assertEquals("3.14", pasted("3,14"))
+        assertEquals("gcd(12,18)", pasted("gcd(12,18)"))
+        assertEquals("1000", pasted("1 000"))
+    }
+    @Test fun fractionKeyTypesASlashAndCarriesOn() {
+        val m = CalcModel()
+        m.tap("3", "a/b", "4", "+", "1", "a/b", "4", "=")
+        assertEquals("1", m.resultText())
+        assertEquals("3/4+1/4", m.lastExpr)
+        val n = CalcModel()
+        n.tap("1", "a/b", "2", "=", "a/b", "3", "=")
+        assertEquals("1/6", n.resultText())
+        // the ÷ key still types ÷
+        val k = CalcModel()
+        k.tap("1", "÷", "2")
+        assertEquals("1÷2", k.expr)
+    }
+
+    @Test fun inputLineHasNoTrailingEquals() {
+        val m = CalcModel()
+        m.tap("2", "+", "3", "=")
+        assertEquals("2+3", m.inputText)
+        assertEquals(3, m.inputCursor)
+    }
 }

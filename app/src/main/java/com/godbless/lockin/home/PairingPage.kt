@@ -116,7 +116,7 @@ internal fun PairingPage(state: PartnerState, onScan: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var code by rememberSaveable { mutableStateOf("") }
 
-    PageScaffold(wide = true) { entrance ->
+    PageScaffold(wide = true, key = "tab-pairing") { entrance ->
         PageTitle("Partner", "Pair up with someone who keeps you honest.", entrance)
         Spacer(Modifier.height(18.dp))
 

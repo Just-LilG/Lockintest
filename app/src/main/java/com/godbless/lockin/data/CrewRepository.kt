@@ -23,6 +23,8 @@ data class CrewMember(
     val joinedAt: Long = 0L,
     /** Seconds held on each day of this week, Monday first. */
     val days: List<Int> = List(7) { 0 },
+    /** How they chose to look, if the server sent it. */
+    val avatar: AvatarSpec? = null,
 )
 
 /** The crew's session that hasn't finished yet: waiting to start, or running. */
@@ -122,6 +124,9 @@ class CrewRepository(private val partners: PartnerRepository) {
             me = me,
             members = List(members.length()) { i ->
                 val m = members.getJSONObject(i)
+                val avatar = AvatarSpec.fromJson(m.optJSONObject("avatar"))
+                // You are drawn from your own saved choice; everyone else is remembered by name.
+                if (m.optString("id") != me) AvatarBook.learn(m.optString("name").ifBlank { "Someone" }, avatar)
                 CrewMember(
                     id = m.optString("id"),
                     name = m.optString("name").ifBlank { "Someone" },
@@ -134,6 +139,7 @@ class CrewRepository(private val partners: PartnerRepository) {
                     last = if (m.isNull("last")) 0L else m.optLong("last"),
                     joinedAt = m.optLong("joined_at"),
                     days = m.optJSONArray("days")?.let { d -> List(7) { k -> d.optInt(k) } } ?: List(7) { 0 },
+                    avatar = avatar,
                 )
             },
             session = s?.let {

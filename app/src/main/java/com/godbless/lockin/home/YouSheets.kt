@@ -324,56 +324,94 @@ private fun Chip(text: String, picked: Boolean, onClick: () -> Unit) {
 // Avatar and what you call your partner
 // ---------------------------------------------------------------------------------------------
 
-/** Pick a colour and a symbol for yourself, and a private nickname for your partner. Both stay on this phone. */
+/** Pick an illustrated avatar (or a colour and symbol) for yourself, which your partner and crew see, and a private nickname for your partner (kept on this phone). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun AvatarSheet(visible: Boolean, name: String, partnerId: String?, partnerRealName: String, onDismiss: () -> Unit) {
     OverlaySheet(visible, onDismiss) {
         var color by remember { mutableIntStateOf(Identity.avatarColor) }
         var glyph by remember { mutableStateOf(Identity.avatarGlyph) }
+        var style by remember { mutableStateOf(Identity.avatarStyle) }
+        var seed by remember { mutableStateOf(Identity.avatarSeed) }
         var nick by remember { mutableStateOf(Identity.nickname(partnerId).orEmpty()) }
 
         Text("Your avatar", style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 30.sp))
-        Text("Only you see this, on this phone.", style = LockInText.Small.copy(color = LockInColors.Mist))
+        Text("Your partner and your crew see this too.", style = LockInText.Small.copy(color = LockInColors.Mist))
         Spacer(Modifier.height(16.dp))
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Avatar(name, boxSize = 84.dp, filled = true, ring = LockInColors.Slate, tint = AvatarColors.getOrNull(color), glyph = glyph.ifBlank { null })
+            Avatar(
+                name, boxSize = 84.dp, filled = true, ring = LockInColors.Slate,
+                tint = AvatarColors.getOrNull(color), glyph = glyph.ifBlank { null },
+                me = true, previewStyle = style, previewSeed = seed,
+            )
         }
         Spacer(Modifier.height(16.dp))
+        // Illustrated styles, each drawn with your current shuffle code, and "Classic" for a colour and symbol.
         FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            AvatarColors.forEachIndexed { i, c ->
+            DiceBear.Styles.forEach { (id, label) ->
                 Box(
                     Modifier
-                        .size(44.dp)
+                        .size(52.dp)
                         .clip(CircleShape)
-                        .background(c)
-                        .then(if (color == i) Modifier.border(3.dp, LockInColors.Snow, CircleShape) else Modifier)
-                        .clickable(role = Role.RadioButton) { color = i }
-                        .semantics { contentDescription = "Colour ${i + 1}"; selected = color == i },
-                )
+                        .then(if (style == id) Modifier.border(3.dp, LockInColors.Lime, CircleShape) else Modifier)
+                        .clickable(role = Role.RadioButton) { style = id }
+                        .semantics { contentDescription = "$label style"; selected = style == id },
+                    contentAlignment = Alignment.Center,
+                ) { Avatar(name, boxSize = 46.dp, ring = LockInColors.Slate, me = true, previewStyle = id, previewSeed = seed) }
             }
-        }
-        Spacer(Modifier.height(14.dp))
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(
                 Modifier
-                    .size(44.dp)
+                    .size(52.dp)
                     .clip(CircleShape)
-                    .background(if (glyph.isBlank()) LockInColors.LimeWash else LockInColors.Graphite)
-                    .clickable(role = Role.RadioButton) { glyph = "" }
-                    .semantics { contentDescription = "Use my initial"; selected = glyph.isBlank() },
+                    .background(LockInColors.Graphite)
+                    .then(if (style.isEmpty()) Modifier.border(3.dp, LockInColors.Lime, CircleShape) else Modifier)
+                    .clickable(role = Role.RadioButton) { style = "" }
+                    .semantics { contentDescription = "Classic: colour and symbol"; selected = style.isEmpty() },
                 contentAlignment = Alignment.Center,
-            ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp)) }
-            AvatarGlyphs.forEach { g ->
+            ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 18.sp)) }
+        }
+        if (style.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                SmallPill("Shuffle", { seed = DiceBear.randomSeed() })
+            }
+        } else {
+            Spacer(Modifier.height(16.dp))
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                AvatarColors.forEachIndexed { i, c ->
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(c)
+                            .then(if (color == i) Modifier.border(3.dp, LockInColors.Snow, CircleShape) else Modifier)
+                            .clickable(role = Role.RadioButton) { color = i }
+                            .semantics { contentDescription = "Colour ${i + 1}"; selected = color == i },
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Box(
                     Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(if (glyph == g) LockInColors.LimeWash else LockInColors.Graphite)
-                        .clickable(role = Role.RadioButton) { glyph = g }
-                        .semantics { contentDescription = "Symbol $g"; selected = glyph == g },
+                        .background(if (glyph.isBlank()) LockInColors.LimeWash else LockInColors.Graphite)
+                        .clickable(role = Role.RadioButton) { glyph = "" }
+                        .semantics { contentDescription = "Use my initial"; selected = glyph.isBlank() },
                     contentAlignment = Alignment.Center,
-                ) { Text(g, fontSize = 20.sp) }
+                ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp)) }
+                AvatarGlyphs.forEach { g ->
+                    Box(
+                        Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(if (glyph == g) LockInColors.LimeWash else LockInColors.Graphite)
+                            .clickable(role = Role.RadioButton) { glyph = g }
+                            .semantics { contentDescription = "Symbol $g"; selected = glyph == g },
+                        contentAlignment = Alignment.Center,
+                    ) { Text(g, fontSize = 20.sp) }
+                }
             }
         }
         if (partnerId != null) {
@@ -389,7 +427,7 @@ internal fun AvatarSheet(visible: Boolean, name: String, partnerId: String?, par
         }
         Spacer(Modifier.height(20.dp))
         LockInButton("Done", onClick = {
-            Identity.setAvatar(color, glyph)
+            Identity.setAvatar(color, glyph, style, seed)
             if (partnerId != null) Identity.setNickname(partnerId, nick)
             onDismiss()
         })

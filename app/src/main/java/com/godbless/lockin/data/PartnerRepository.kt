@@ -30,6 +30,8 @@ sealed interface Pairing {
         val unpairBy: String = "",
         /** When an unanswered request goes through on its own (milliseconds), or 0. */
         val unpairDue: Long = 0L,
+        /** How they chose to look, if the server sent it. */
+        val partnerAvatar: AvatarSpec? = null,
     ) : Pairing
 }
 
@@ -39,6 +41,13 @@ object VoiceDir {
     @Volatile var dir: java.io.File? = null
     /** Where recordings were kept before they moved to the app's own (permanent) storage. */
     @Volatile var legacy: java.io.File? = null
+
+    /** Safe to call any number of times. Needed because the app can start before first unlock, when this is skipped. */
+    fun init(ctx: android.content.Context) {
+        if (dir != null) return
+        dir = java.io.File(ctx.filesDir, "voice").apply { mkdirs() }
+        legacy = java.io.File(ctx.cacheDir, "voice")
+    }
 }
 
 /**
@@ -47,6 +56,12 @@ object VoiceDir {
  */
 object MediaDir {
     @Volatile var dir: java.io.File? = null
+
+    /** Safe to call any number of times. */
+    fun init(ctx: android.content.Context) {
+        if (dir != null) return
+        dir = java.io.File(ctx.filesDir, "chat_media").apply { mkdirs() }
+    }
 
     /** What photos and voice notes take on this phone, in bytes. */
     fun bytes(): Long = listOfNotNull(dir, VoiceDir.dir).sumOf { d -> d.listFiles()?.sumOf { it.length() } ?: 0L }
@@ -243,14 +258,20 @@ class PartnerRepository(private val auth: AuthRepository) {
         val j = JSONObject(text)
         return when (j.optString("status")) {
             "pending" -> Pairing.Pending(j.optString("code"), parseTime(j.optString("expires")))
-            "paired" -> Pairing.Paired(
-                j.optString("id"),
-                j.optString("partner_id"),
-                j.optString("partner_name").ifEmpty { "Your partner" },
-                parseTime(j.optString("paired_at")),
-                unpairBy = j.optString("unpair_by", ""),
-                unpairDue = j.optLong("unpair_due", 0L) * 1000L,
-            )
+            "paired" -> {
+                val avatar = AvatarSpec.fromJson(j.optJSONObject("partner_avatar"))
+                val partnerName = j.optString("partner_name").ifEmpty { "Your partner" }
+                AvatarBook.learn(partnerName, avatar)
+                Pairing.Paired(
+                    j.optString("id"),
+                    j.optString("partner_id"),
+                    partnerName,
+                    parseTime(j.optString("paired_at")),
+                    unpairBy = j.optString("unpair_by", ""),
+                    unpairDue = j.optLong("unpair_due", 0L) * 1000L,
+                    partnerAvatar = avatar,
+                )
+            }
             else -> Pairing.None
         }
     }

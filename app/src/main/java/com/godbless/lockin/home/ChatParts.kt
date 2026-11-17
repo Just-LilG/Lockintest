@@ -11,6 +11,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.animateFloatAsState
@@ -18,6 +26,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -431,7 +440,10 @@ internal fun VoiceBubble(path: String, ms: Int, wave: String, mine: Boolean, fet
     val fg = if (mine) LockInColors.OnLime else LockInColors.Snow
     val dim = if (mine) LockInColors.OnLime.copy(alpha = 0.35f) else LockInColors.Edge
     val progress by animateFloatAsState(if (active) VoicePlayer.progress else 0f, spring(dampingRatio = 1f, stiffness = 900f), label = "voice")
-    val press by animateFloatAsState(if (playing) 0.92f else 1f, spring(dampingRatio = 0.5f, stiffness = 500f), label = "play")
+    // Shrinks only while the finger is down (no bounce). It used to stay shrunk the whole time it played, with a wobble.
+    val source = remember { MutableInteractionSource() }
+    val down by source.collectIsPressedAsState()
+    val press by animateFloatAsState(if (down) 0.92f else 1f, spring(dampingRatio = 1f, stiffness = 700f), label = "play")
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.width(230.dp)) {
         Box(
             Modifier
@@ -439,7 +451,7 @@ internal fun VoiceBubble(path: String, ms: Int, wave: String, mine: Boolean, fet
                 .graphicsLayer { scaleX = press; scaleY = press }
                 .clip(CircleShape)
                 .background(if (mine) LockInColors.OnLime else LockInColors.Lime)
-                .clickable(role = Role.Button) { VoicePlayer.toggle(context, path, fetch) }
+                .clickable(interactionSource = source, indication = LocalIndication.current, role = Role.Button) { VoicePlayer.toggle(context, path, fetch) }
                 .semantics {
                     contentDescription = when {
                         loading -> "Loading voice message. Tap to cancel"
@@ -451,7 +463,8 @@ internal fun VoiceBubble(path: String, ms: Int, wave: String, mine: Boolean, fet
             contentAlignment = Alignment.Center,
         ) {
             val iconColor = if (mine) LockInColors.Lime else LockInColors.OnLime
-            if (loading) {
+            Crossfade(targetState = loading, animationSpec = tween(140), label = "voiceIcon") { isLoading ->
+            if (isLoading) {
                 // Still downloading: a turning ring, never the pause bars, until it really plays.
                 RingSpinner(iconColor, size = 16.dp, stroke = 2.dp)
             } else Canvas(Modifier.size(14.dp)) {
@@ -465,6 +478,7 @@ internal fun VoiceBubble(path: String, ms: Int, wave: String, mine: Boolean, fet
                     }
                     drawPath(p, iconColor)
                 }
+            }
             }
         }
         // The waveform: bars from the recording, lit up to where it's playing.
@@ -500,7 +514,12 @@ internal fun VoiceBubble(path: String, ms: Int, wave: String, mine: Boolean, fet
                 )
             }
         }
-        if (active) {
+        // The speed chip eases in (the waveform glides narrower) instead of popping in and jerking the bars.
+        AnimatedVisibility(
+            visible = active,
+            enter = expandHorizontally(tween(220), expandFrom = Alignment.End) + fadeIn(tween(220)),
+            exit = shrinkHorizontally(tween(180), shrinkTowards = Alignment.End) + fadeOut(tween(120)),
+        ) {
             Box(
                 Modifier
                     .padding(end = 6.dp)

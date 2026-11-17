@@ -44,6 +44,16 @@ internal object Solver {
         } catch (e: CalcException) {
             Double.NaN
         }
+        // An identity (3=3, x=x) is true for every x, so there is no single answer to give.
+        if (doubleArrayOf(0.0, 1.0, -1.0, 2.5, -7.0).all { f(guess + it) == 0.0 }) throw CalcException("True for every x")
+        // A real root: f grows away from it. If f barely changes either side (like e^x near −30) it is only
+        // sliding towards zero and there is no solution there.
+        fun genuine(x: Double): Boolean {
+            val fx = abs(f(x))
+            val d = 1e-3 * maxOf(1.0, abs(x))
+            val l = abs(f(x - d)); val r = abs(f(x + d))
+            return maxOf(if (l.isNaN()) 0.0 else l, if (r.isNaN()) 0.0 else r) > 10 * fx
+        }
         fun done(x: Double): SolveResult {
             val tidy = Calc.snap(x)
             val fx = f(tidy)
@@ -66,7 +76,7 @@ internal object Solver {
             x = next
         }
         // A "root" this far out is usually a function sliding towards zero (like 1÷x), not a real solution.
-        if ((ok || abs(f(x)) < 1e-9) && abs(x) < 1e8) return done(x)
+        if ((ok || abs(f(x)) < 1e-9) && abs(x) < 1e8 && genuine(x)) return done(x)
 
         // Otherwise look for a sign change in ever wider windows around the guess, then narrow it down.
         var radius = 1.0
@@ -87,7 +97,8 @@ internal object Solver {
                     }
                     val root = (lo + hi) / 2
                     // A jump (like 1÷x at 0) changes sign without crossing zero: skip those.
-                    if (abs(f(root)) < 1e-6 * maxOf(1.0, abs(prevF), abs(cf))) return done(root)
+                    // (A value that is exactly 0 only because the function underflowed, like e^x far out, is not a root.)
+                    if (abs(f(root)) < 1e-6 * maxOf(1.0, abs(prevF), abs(cf)) && genuine(root)) return done(root)
                 }
                 prevX = cx; prevF = cf
             }
@@ -317,7 +328,7 @@ internal object BaseN {
 
     fun eval(text: String, base: Base): Long {
         val p = P(text, base)
-        val v = p.logic()
+        val v = try { p.logic() } catch (e: StackOverflowError) { throw CalcException("Too complex") }
         p.skip()
         if (p.i < text.length) throw CalcException("Syntax error")
         return v
@@ -574,10 +585,13 @@ internal class Mat(val rows: Int, val cols: Int, val a: DoubleArray) {
         val m = a.copyOf()
         val n = rows
         var d = 1.0
+        // A pivot this small next to the biggest entry is rounding noise, so the matrix is singular:
+        // [[1,2,3],[4,5,6],[7,8,9]] has determinant 0, not 6.7E-16.
+        val noise = 1e-12 * (a.maxOfOrNull { abs(it) } ?: 0.0)
         for (c in 0 until n) {
             var p = c
             for (r in c + 1 until n) if (abs(m[r * n + c]) > abs(m[p * n + c])) p = r
-            if (m[p * n + c] == 0.0) return 0.0
+            if (abs(m[p * n + c]) <= noise) return 0.0
             if (p != c) { for (k in 0 until n) { val t = m[c * n + k]; m[c * n + k] = m[p * n + k]; m[p * n + k] = t }; d = -d }
             d *= m[c * n + c]
             for (r in c + 1 until n) {
@@ -705,7 +719,7 @@ internal object CalcComplex {
 
     fun eval(text: String, angle: AngleMode, ans: Cx = Cx(0.0)): Cx {
         val p = P(text.replace('−', '-'), angle, ans)
-        val v = p.expr()
+        val v = try { p.expr() } catch (e: StackOverflowError) { throw CalcException("Too complex") }
         p.skip()
         if (p.i < p.s.length) throw CalcException("Syntax error")
         return tidy(v)

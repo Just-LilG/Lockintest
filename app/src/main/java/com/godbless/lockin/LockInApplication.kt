@@ -57,9 +57,8 @@ class LockInApplication : Application() {
         if (!unlocked) return
         // Voice notes and photos live in the app's own storage (not the cache): once your partner has theirs, the server
         // deletes its copy, so the phone must not be allowed to clear this on its own. Older ones sat in the cache.
-        com.godbless.lockin.data.VoiceDir.dir = java.io.File(filesDir, "voice").apply { mkdirs() }
-        com.godbless.lockin.data.VoiceDir.legacy = java.io.File(cacheDir, "voice")
-        com.godbless.lockin.data.MediaDir.dir = java.io.File(filesDir, "chat_media").apply { mkdirs() }
+        com.godbless.lockin.data.VoiceDir.init(this)
+        com.godbless.lockin.data.MediaDir.init(this)
         // Off the main thread: the first time, the sounds are copied into the Notifications folder.
         Thread { runCatching { Push.ensureChannels(this) } }.start()
         // A partner's lock that was running when LockIn last stopped picks up again straight away.

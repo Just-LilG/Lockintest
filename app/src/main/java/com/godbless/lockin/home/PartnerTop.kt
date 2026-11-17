@@ -87,7 +87,7 @@ internal fun PartnerTopPager(
     if (com.godbless.lockin.ui.isWide()) {
         Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             for (page in 0..1) {
-                val slide = rememberSlideIn(true, page)
+                val slide = rememberSlideIn(true, page, key = "partner-top-$page")
                 Box(
                     Modifier
                         .fillMaxWidth()
@@ -109,7 +109,11 @@ internal fun PartnerTopPager(
         HorizontalPager(
             state = pager,
             pageSpacing = 10.dp,
-            modifier = Modifier.fillMaxWidth().height(350.dp),
+            // Page one is 304 tall and page two 350, as on a tablet. A single 350 left a big empty gap inside page one.
+            // The card eases between the two as you swipe.
+            modifier = Modifier.fillMaxWidth().height(
+                androidx.compose.ui.unit.lerp(304.dp, 350.dp, (pager.currentPage + pager.currentPageOffsetFraction).coerceIn(0f, 1f)),
+            ),
         ) { page ->
             // Pages tilt and shrink a touch as they slide away, so the swipe has depth.
             Box(
@@ -168,8 +172,11 @@ private fun PartnerPage0(
     val stats = LocalStats.current
     val goal = LocalGoalMinutes.current * 60f
     val theirGoal = LocalPartnerGoalMinutes.current * 60f
-    val pull = remember { Animatable(0f) }
+    // The rope tightens the first time this card appears in a run of the app; coming back it is already taut.
+    val pull = remember { Animatable(if (HomeIntro.ropePulled) 1f else 0f) }
     LaunchedEffect(Unit) {
+        if (HomeIntro.ropePulled) return@LaunchedEffect
+        HomeIntro.ropePulled = true
         delay(200)
         pull.animateTo(1f, spring(dampingRatio = 0.38f, stiffness = 120f))
     }
@@ -330,8 +337,12 @@ private fun UsagePage(usage: UsageState, onPickApp: (PartnerApp) -> Unit, onAllA
                 val top = (apps.firstOrNull()?.seconds ?: 1).coerceAtLeast(1)
                 Text(formatMinutes((today?.total ?: 0) / 60), style = LockInText.Headline.copy(fontSize = 36.sp, lineHeight = 42.sp))
                 Spacer(Modifier.height(8.dp))
-                val grow = remember { Animatable(0f) }
-                LaunchedEffect(Unit) { grow.animateTo(1f, tween(800, easing = UiGlide)) }
+                val grow = remember { Animatable(if (HomeIntro.usageGrown) 1f else 0f) }
+                LaunchedEffect(Unit) {
+                    if (HomeIntro.usageGrown) return@LaunchedEffect
+                    HomeIntro.usageGrown = true
+                    grow.animateTo(1f, tween(800, easing = UiGlide))
+                }
                 if (apps.isEmpty()) {
                     Text("Nothing used yet today.", style = LockInText.Small.copy(color = LockInColors.Body))
                 }
@@ -540,7 +551,7 @@ private fun LastLockLine(lock: LockState) {
         "unpaired" -> "ended when you unpaired"
         else -> "ended"
     }
-    val slide = rememberSlideIn(true, 2)
+    val slide = rememberSlideIn(true, 2, key = "partner-lastlock")
     Column(Modifier.fillMaxWidth().graphicsLayer { translationX = slide.value * size.width * 0.25f }) {
         Text(
             "Last lock: ${formatMinutes(maxOf(last.seconds / 60, 1))}, $ended",

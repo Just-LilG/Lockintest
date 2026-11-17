@@ -242,4 +242,38 @@ class CalcToolsTest {
         assertThrows("b=0", CalcException::class.java) { Ratio.findThird(1.0, 0.0, 1.0) }
         assertThrows("neg", CalcException::class.java) { Ratio.simplify(-1.0, 2.0) }
     }
+    // ---- 0.28.1 regressions ----
+
+    @Test fun nanAndInfinityNeverReachTheFormatter() {
+        // The Statistics page printed the sample deviation of one value (NaN), which crashed the app.
+        assertTrue(Stat.oneVar(listOf(5.0)).sampleSd.isNaN())
+        assertThrows(CalcException::class.java) { Calc.format(Double.NaN, NumFormat()) }
+        assertThrows(CalcException::class.java) { Calc.format(Double.POSITIVE_INFINITY, NumFormat()) }
+        val flat = Stat.regress(Reg.Linear, listOf(1.0, 2.0, 3.0), listOf(5.0, 5.0, 5.0))
+        assertTrue(flat.r == null || flat.r!!.isNaN())
+    }
+
+    @Test fun singularMatrixHasZeroDeterminant() {
+        val m = Mat(3, 3, doubleArrayOf(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0))
+        assertEquals(0.0, m.det(), 0.0)
+        assertEquals(-2.0, Mat(2, 2, doubleArrayOf(1.0, 2.0, 3.0, 4.0)).det(), 1e-12)
+        // tiny but genuine matrices are not mistaken for singular ones
+        assertEquals(1e-160, Mat(2, 2, doubleArrayOf(1e-80, 0.0, 0.0, 1e-80)).det(), 1e-170)
+    }
+
+    @Test fun solverRejectsFalseRootsAndIdentities() {
+        assertThrows(CalcException::class.java) { Solver.solve("e^(x)=0", "x", 0.0, AngleMode.Rad) }
+        assertThrows(CalcException::class.java) { Solver.solve("3=3", "x", 0.0, AngleMode.Rad) }
+        assertThrows(CalcException::class.java) { Solver.solve("x=x", "x", 0.0, AngleMode.Rad) }
+        // and real roots, including a double root, still work
+        assertEquals(1.0, Solver.solve("(x-1)²=0", "x", 0.0, AngleMode.Rad).x, 1e-5)
+        assertEquals(2.0, Solver.solve("2^(x)=4", "x", 0.0, AngleMode.Rad).x, 1e-9)
+    }
+
+    @Test fun veryDeepNestingIsAnErrorNotACrash() {
+        val deep = "(".repeat(20000) + "1" + ")".repeat(20000)
+        val e = assertThrows(CalcException::class.java) { Calc.eval(deep, AngleMode.Rad, 0.0) }
+        assertEquals("Too complex", e.message)
+        assertThrows(CalcException::class.java) { Calc.eval("-".repeat(20000) + "1", AngleMode.Rad, 0.0) }
+    }
 }

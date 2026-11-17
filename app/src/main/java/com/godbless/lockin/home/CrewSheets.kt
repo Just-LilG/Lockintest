@@ -179,7 +179,7 @@ internal fun CrewSheets(state: CrewState) {
             val you = m.id == c.me
             val rank = c.members.sortedByDescending { it.week }.indexOfFirst { it.id == m.id } + 1
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Avatar(m.name, boxSize = 64.dp, filled = true, ring = LockInColors.Slate, tint = memberColor(m, c.me), glyph = if (you) Identity.glyph else null)
+                Avatar(m.name, boxSize = 64.dp, filled = true, ring = LockInColors.Slate, me = you)
                 Column(Modifier.weight(1f).padding(start = 14.dp)) {
                     Text(crewName(m, c.me), style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 30.sp), maxLines = 1)
                     Text(

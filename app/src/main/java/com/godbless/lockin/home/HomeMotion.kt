@@ -34,13 +34,32 @@ internal fun <T> homeSpring(bouncy: Boolean = false) =
     if (com.godbless.lockin.ui.MotionState.reduced) spring<T>(dampingRatio = 1f, stiffness = 3000f)
     else if (bouncy) spring<T>(dampingRatio = 0.55f, stiffness = 260f) else spring<T>(dampingRatio = 0.8f, stiffness = 140f)
 
-/** Text whose letters rise into place one after another from below a clipped baseline. */
+/**
+ * What Home has already shown since the app opened. Intros (the greeting, the count-up, the mountain walking up)
+ * play once; coming back to Home from another tab shows everything settled, so it never looks like a reset.
+ */
+internal object HomeIntro {
+    var greeted = false
+    var weekGrown = false
+    var usageGrown = false
+    var ropePulled = false
+    var sceneSeen = false
+    /** The flag's wave clock when Home was last on screen, so it carries on instead of climbing out of the summit again. */
+    var sceneClock = 0.2f
+    /** Today's minutes as last shown, null before the first count-up. */
+    var countedMinutes: Float? = null
+    /** Slide-ins and pops that have played, by name. */
+    val played = mutableSetOf<String>()
+}
+
+/** Text whose letters rise into place one after another from below a clipped baseline. [settled] skips the intro. */
 @Composable
-internal fun StaggerText(text: String, style: TextStyle, modifier: Modifier = Modifier, startDelay: Long = 120L) {
+internal fun StaggerText(text: String, style: TextStyle, modifier: Modifier = Modifier, startDelay: Long = 120L, settled: Boolean = false) {
     Row(modifier.clipToBounds()) {
         com.godbless.lockin.ui.graphemes(text).forEachIndexed { i, ch ->
-            val lift = remember(text) { Animatable(1f) }
+            val lift = remember(text) { Animatable(if (settled) 0f else 1f) }
             LaunchedEffect(text) {
+                if (settled) return@LaunchedEffect
                 delay(if (com.godbless.lockin.ui.MotionState.reduced) 0L else startDelay + i * 45L)
                 lift.animateTo(0f, homeSpring(bouncy = true))
             }
@@ -55,9 +74,12 @@ internal fun StaggerText(text: String, style: TextStyle, modifier: Modifier = Mo
 
 /** Grows from nothing to full size with a small bounce, after [delayMillis]. */
 @Composable
-internal fun rememberPop(delayMillis: Long): State<Float> {
-    val a = remember { Animatable(0f) }
+internal fun rememberPop(delayMillis: Long, key: String? = null): State<Float> {
+    val seen = key != null && key in HomeIntro.played
+    val a = remember { Animatable(if (seen) 1f else 0f) }
     LaunchedEffect(Unit) {
+        if (key != null) HomeIntro.played.add(key)
+        if (a.value >= 1f) return@LaunchedEffect
         delay(if (com.godbless.lockin.ui.MotionState.reduced) 0L else delayMillis)
         a.animateTo(1f, homeSpring(bouncy = true))
     }
@@ -84,10 +106,13 @@ internal fun rememberInView(): Pair<InView, Modifier> {
 
 /** Slides in from the side (and settles with a spring) once [go] turns true; staggered by [index]. */
 @Composable
-internal fun rememberSlideIn(go: Boolean, index: Int, fromRight: Boolean = true): State<Float> {
-    val a = remember { Animatable(1f) }
+internal fun rememberSlideIn(go: Boolean, index: Int, fromRight: Boolean = true, key: String? = null): State<Float> {
+    val seen = key != null && key in HomeIntro.played
+    val a = remember { Animatable(if (seen) 0f else 1f) }
     LaunchedEffect(go) {
         if (!go) return@LaunchedEffect
+        if (key != null) HomeIntro.played.add(key)
+        if (a.value <= 0f) return@LaunchedEffect
         launch {
             delay(index * 90L)
             a.animateTo(0f, homeSpring())
@@ -105,6 +130,8 @@ internal fun WavingHand(modifier: Modifier = Modifier) {
     val angle = remember { Animatable(0f) }
     LaunchedEffect(Unit) {
         if (com.godbless.lockin.ui.MotionState.reduced) return@LaunchedEffect
+        if (HomeIntro.played.contains("wave")) return@LaunchedEffect
+        HomeIntro.played.add("wave")
         delay(500)
         for (target in floatArrayOf(22f, -12f, 20f, -8f, 14f, 0f)) {
             angle.animateTo(target, androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.FastOutSlowInEasing))

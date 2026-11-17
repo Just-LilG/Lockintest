@@ -70,7 +70,8 @@ import kotlin.math.pow
 
 private val Shown = NumFormat(NumFormat.Kind.Norm2, 11)
 
-private fun show(v: Double) = Calc.format(v, Shown)
+/** A dash when a figure does not exist (the sample deviation of one value, r of a flat line), never a crash. */
+private fun show(v: Double) = if (v.isNaN() || v.isInfinite()) "—" else Calc.format(v, Shown)
 
 /** A number box's text as a number: blank is null, a bad sum is an error. */
 private fun cell(text: String): Double? {

@@ -85,7 +85,7 @@ internal fun PartnerPage(
     plans: PlanState,
     onPlan: () -> Unit,
 ) {
-    PageScaffold(wide = true) { entrance ->
+    PageScaffold(wide = true, key = "tab-partner") { entrance ->
         val stats = LocalStats.current
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {
@@ -101,7 +101,7 @@ internal fun PartnerPage(
             }
             // On a tablet the chat opens beside the page, so a Message button up here is always in reach.
             if (com.godbless.lockin.ui.isWide()) {
-                val slide = rememberSlideIn(true, 1)
+                val slide = rememberSlideIn(true, 1, key = "partner-message")
                 SmallPill("Message", onMessage, Modifier.graphicsLayer { translationX = slide.value * 160.dp.toPx() })
             }
         }

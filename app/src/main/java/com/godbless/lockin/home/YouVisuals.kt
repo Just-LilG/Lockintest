@@ -137,7 +137,7 @@ internal fun ProfileHeader(
                 if (fill > 0f) drawArc(LockInColors.Lime, -90f, 360f * fill, false, Offset(inset, inset), arc, style = Stroke(stroke, cap = StrokeCap.Round))
             }
             Avatar(
-                name, boxSize = 48.dp, filled = true, ring = LockInColors.Ink, tint = tint, glyph = glyph,
+                name, boxSize = 48.dp, filled = true, ring = LockInColors.Ink, me = true,
                 modifier = if (onAvatar != null) Modifier.springClick(onClick = onAvatar).semantics { contentDescription = "Change your avatar" } else Modifier,
             )
         }

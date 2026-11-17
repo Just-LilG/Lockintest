@@ -21,6 +21,9 @@ class MainActivity : FragmentActivity() {
         // Removing it immediately (no exit animation) keeps the hand-off to our own first frame seamless.
         installSplashScreen().setOnExitAnimationListener { it.remove() }
         super.onCreate(savedInstanceState)
+        // The app process can start before first unlock (Application.onCreate skips these then); the user is unlocked now.
+        com.godbless.lockin.data.VoiceDir.init(applicationContext)
+        com.godbless.lockin.data.MediaDir.init(applicationContext)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),

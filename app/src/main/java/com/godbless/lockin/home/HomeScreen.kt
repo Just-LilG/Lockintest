@@ -200,7 +200,11 @@ fun HomeScreen(
 
     // You: your profile (the name you edit on the You tab), and which page from there is open.
     val you = remember { YouState(com.godbless.lockin.data.ProfileRepository(partners), auth, scope, name, context.applicationContext) }
-    LaunchedEffect(Unit) { you.refresh() }
+    LaunchedEffect(Unit) {
+        Identity.syncUp = { spec -> you.saveAvatar(spec) }
+        you.refresh()
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { Identity.syncUp = null } }
     var youPage by rememberSaveable { mutableStateOf(YouSub.None) }
     // Kept while a page slides out, so it doesn't go blank on the way.
     var shownYouPage by remember { mutableStateOf(YouSub.None) }
@@ -1386,12 +1390,15 @@ private fun HomeTab(
 
     // Home owns its scroll so the header and the mountain can move at their own pace as you scroll.
     val scroll = rememberScrollState()
-    val avatarPop = rememberPop(380)
-    val bellPop = rememberPop(520)
+    val avatarPop = rememberPop(380, "home-avatar")
+    val bellPop = rememberPop(520, "home-bell")
+    // The greeting types in the first time Home opens in this run of the app; later it is simply there.
+    val greetSettled = remember { HomeIntro.greeted }
+    LaunchedEffect(Unit) { HomeIntro.greeted = true }
     val (weekSeen, weekProbe) = rememberInView()
     val (recentSeen, recentProbe) = rememberInView()
 
-    PageScaffold(scroll = scroll, entranceMillis = 1100, wide = true) { entrance ->
+    PageScaffold(scroll = scroll, entranceMillis = 1100, wide = true, key = "tab-home") { entrance ->
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1407,11 +1414,11 @@ private fun HomeTab(
                     .springClick(onClick = onProfile)
                     .semantics { contentDescription = "Your profile" },
             ) {
-                Avatar(first, boxSize = 48.dp, ring = LockInColors.Ink, tint = Identity.tint, glyph = Identity.glyph)
+                Avatar(first, boxSize = 48.dp, ring = LockInColors.Ink, me = true)
             }
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                StaggerText("$greeting,", LockInText.Sub.copy(color = LockInColors.Silver), startDelay = 60L)
-                StaggerText(first, LockInText.Title, startDelay = 220L)
+                StaggerText("$greeting,", LockInText.Sub.copy(color = LockInColors.Silver), startDelay = 60L, settled = greetSettled)
+                StaggerText(first, LockInText.Title, startDelay = 220L, settled = greetSettled)
             }
             NotificationBell(
                 unread = unread,

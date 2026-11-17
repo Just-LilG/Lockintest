@@ -130,6 +130,8 @@ internal fun ClimbScene(
     youLabel: String? = null,
     /** Home is covered by a full page: stop the animation loops until it is uncovered. */
     paused: Boolean = false,
+    /** Home's own scene: the walk-up and the grow-in play once per run of the app, then it comes back settled. */
+    settleOnReturn: Boolean = false,
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -166,8 +168,10 @@ internal fun ClimbScene(
     val frameGap = frameMillis
 
     // Climbers walk up to where they are when the scene appears, then creep on as the seconds add up.
-    val you = remember { Animatable(0f) }
-    val partner = remember { Animatable(0f) }
+    // Already seen in this run of the app (you came back from another tab): they start where they are, no walk-up.
+    val seenBefore = remember { settleOnReturn && HomeIntro.sceneSeen && !SceneHandoff.flying }
+    val you = remember { Animatable(if (seenBefore) reach(doneSeconds, goalSeconds) else 0f) }
+    val partner = remember { Animatable(if (seenBefore) reach(partnerSeconds, partnerGoalSeconds) else 0f) }
     // While the welcome page is still handing the scene over they simply stand where it puts them.
     LaunchedEffect(doneSeconds, goalSeconds) {
         val to = reach(doneSeconds, goalSeconds)
@@ -180,7 +184,7 @@ internal fun ClimbScene(
 
     // The flag climbs out of the summit when the scene appears, then keeps waving. After a handover from
     // the welcome page it carries on from the welcome page's clock, so the wave never skips.
-    val clock = remember { mutableFloatStateOf(if (SceneHandoff.flying) SceneHandoff.clock else 0.2f) }
+    val clock = remember { mutableFloatStateOf(if (SceneHandoff.flying) SceneHandoff.clock else if (seenBefore) maxOf(HomeIntro.sceneClock, 3.2f) else 0.2f) }
     LaunchedEffect(frameGap, motionOff, paused) {
         if (paused) return@LaunchedEffect
         if (motionOff) {
@@ -198,6 +202,7 @@ internal fun ClimbScene(
                 if (SceneHandoff.flying) base = SceneHandoff.clock - elapsed
                 if (frameGap <= 0L || now - last >= frameGap * 1_000_000L) {
                     clock.floatValue = base + elapsed
+                    if (settleOnReturn) HomeIntro.sceneClock = clock.floatValue
                     last = now
                 }
             }
@@ -210,9 +215,13 @@ internal fun ClimbScene(
     val night = hour >= 22.5f || hour < 5.5f
 
     // The sky, weather, trail and cairns grow in once the scene is on screen (nothing fades in).
-    val bloom = remember { Animatable(if (motionOff) 1f else 0f) }
+    val bloom = remember { Animatable(if (motionOff || seenBefore) 1f else 0f) }
     LaunchedEffect(SceneHandoff.sceneHidden) {
-        if (!SceneHandoff.sceneHidden) bloom.animateTo(1f, tween(1600, delayMillis = 350, easing = UiGlide))
+        if (!SceneHandoff.sceneHidden) {
+            // From here on, coming back to Home shows the scene settled instead of growing in again.
+            if (settleOnReturn) HomeIntro.sceneSeen = true
+            if (bloom.value < 1f) bloom.animateTo(1f, tween(1600, delayMillis = 350, easing = UiGlide))
+        }
     }
 
     // ----- Moods, each a spring so the climbers ease from one into the next -----

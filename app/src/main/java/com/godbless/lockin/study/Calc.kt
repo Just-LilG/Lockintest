@@ -108,7 +108,8 @@ internal object Calc {
         random: () -> Double = Math::random,
     ): Outcome {
         val p = Parser(normalise(text), angle, ans, memory, vars, random, Budget(maxWork))
-        val v = p.parseAll()
+        // Thousands of nested brackets (a long paste) would overflow the stack and crash the app.
+        val v = try { p.parseAll() } catch (e: StackOverflowError) { throw CalcException("Too complex") }
         if (v.isNaN()) throw CalcException("Math error")
         if (v.isInfinite()) throw CalcException("Too big")
         return Outcome(v, p.extra, p.isBool)
@@ -147,6 +148,8 @@ internal object Calc {
 
     /** The answer in the chosen display format (NORM, FIX or SCI). */
     fun format(value: Double, fmt: NumFormat): String {
+        // NaN and infinity have no digits: BigDecimal would throw a NumberFormatException the pages don't catch.
+        if (value.isNaN() || value.isInfinite()) throw CalcException("Math error")
         if (value == 0.0) return if (fmt.kind == NumFormat.Kind.Fix) String.format(Locale.US, "%.${fmt.digits}f", 0.0) else if (fmt.kind == NumFormat.Kind.Sci) "0." + "0".repeat(fmt.digits) + "E0" else "0"
         val a = abs(value)
         return when (fmt.kind) {

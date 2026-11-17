@@ -480,6 +480,8 @@ fun IntroWelcomeScreen(
                                 com.godbless.lockin.lock.Protection.required(context, com.godbless.lockin.lock.Protection.SignOut) ->
                                     askSwitch = true
                                 else -> {
+                                    com.godbless.lockin.home.Identity.load(context)
+                                    com.godbless.lockin.home.Identity.reset()
                                     repo.signOut()
                                     saved = null
                                     continueNote = null
@@ -504,6 +506,8 @@ fun IntroWelcomeScreen(
                 onAllowed = {
                     askSwitch = false
                     com.godbless.lockin.lock.Protection.clear(context)
+                    com.godbless.lockin.home.Identity.load(context)
+                    com.godbless.lockin.home.Identity.reset()
                     repo.signOut()
                     saved = null
                     continueNote = null

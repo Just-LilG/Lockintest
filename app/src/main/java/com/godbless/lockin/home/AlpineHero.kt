@@ -146,12 +146,29 @@ internal fun AlpineHero(
     val taut = remember { Animatable(0f) }
     LaunchedEffect(locked) { taut.animateTo(if (locked) 1f else 0f, spring(dampingRatio = 0.4f, stiffness = 140f)) }
 
-    // Today's minutes count up when Home opens and whenever they change.
-    val counted = remember { Animatable(0f) }
+    // Today's minutes count up the first time Home opens in this run of the app, and glide when they change. Coming
+    // back from another tab shows the number already there (it used to count up from 0 on every visit, which looked
+    // like your progress had reset).
+    val counted = remember { Animatable(HomeIntro.countedMinutes ?: 0f) }
+    var firstCount by remember { androidx.compose.runtime.mutableStateOf(HomeIntro.countedMinutes == null) }
     LaunchedEffect(doneSeconds / 60) {
-        kotlinx.coroutines.delay(350)
-        counted.animateTo((doneSeconds / 60).toFloat(), tween(1300, easing = UiGlide))
+        val target = (doneSeconds / 60).toFloat()
+        if (firstCount) {
+            // Nothing to count to yet (today's total may still be loading): wait for a real number.
+            if (target <= 0f) return@LaunchedEffect
+            HomeIntro.countedMinutes = 0f
+            firstCount = false
+            kotlinx.coroutines.delay(350)
+            counted.animateTo(target, tween(1300, easing = UiGlide))
+        } else if (counted.value != target) {
+            counted.animateTo(target, tween(600, easing = UiGlide))
+        }
     }
+    LaunchedEffect(Unit) {
+        androidx.compose.runtime.snapshotFlow { counted.value }.collect { if (!firstCount) HomeIntro.countedMinutes = it }
+    }
+    // The chip and the captions follow the number while it counts, so "Goal reached" never sits beside "0 min".
+    val shownSeconds = if (locked || kotlin.math.abs(counted.value - (doneSeconds / 60)) < 1f) doneSeconds else (counted.value * 60f).toInt()
 
     val goalSeconds = LocalGoalMinutes.current * 60
     val partnerGoalSeconds = LocalPartnerGoalMinutes.current * 60
@@ -198,6 +215,7 @@ internal fun AlpineHero(
                         translationY = parallax() * 0.22f
                     },
                 tagScale = { reveal.value },
+                settleOnReturn = true,
                 nudge = { nudge.value },
                 onPartnerTap = tapPartner,
                 paused = covered,
@@ -266,12 +284,12 @@ internal fun AlpineHero(
                 }
             }
 
-            val goalPct = if (goalSeconds > 0) (doneSeconds * 100L / goalSeconds).toInt() else 0
+            val goalPct = if (goalSeconds > 0) (shownSeconds * 100L / goalSeconds).toInt() else 0
             val partnerFirst = LocalPartnerName.current.trim().substringBefore(' ').let { if (it.length > 10) it.take(9) + "…" else it }
             val chipText = when {
                 locked -> "Locked"
-                goalSeconds > 0 && doneSeconds >= goalSeconds -> "Goal reached"
-                doneSeconds > 0 -> "$goalPct% of goal"
+                goalSeconds > 0 && shownSeconds >= goalSeconds -> "Goal reached"
+                shownSeconds > 0 -> "$goalPct% of goal"
                 lock != null && partnerSeconds > 0 -> "$partnerFirst · ${formatMinutes(partnerSeconds / 60)} in"
                 else -> "Ready"
             }
@@ -291,16 +309,16 @@ internal fun AlpineHero(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val left = (goalSeconds - doneSeconds) / 60
+                val left = (goalSeconds - shownSeconds) / 60
                 Text(
                     when {
                         locked -> "The rope is tight. Stay off your phone."
                         goalSeconds > 0 && left <= 0 -> "Goal reached. You made the summit."
-                        doneSeconds == 0 && stats.restToday -> "Rest day. Your streak is safe."
-                        doneSeconds == 0 && hourNow < 5 -> "Sleep is part of the climb."
-                        !stats.todayCounted && stats.streak > 0 && doneSeconds == 0 ->
+                        shownSeconds == 0 && stats.restToday -> "Rest day. Your streak is safe."
+                        shownSeconds == 0 && hourNow < 5 -> "Sleep is part of the climb."
+                        !stats.todayCounted && stats.streak > 0 && shownSeconds == 0 ->
                             "Lock in today to keep your ${stats.streak}-day streak"
-                        doneSeconds == 0 -> "Your first climb of the day starts here"
+                        shownSeconds == 0 -> "Your first climb of the day starts here"
                         else -> "$left min to go"
                     },
                     style = LockInText.Small.copy(color = LockInColors.Body),

@@ -119,10 +119,21 @@ internal val UiGlide = androidx.compose.animation.core.Easing { f ->
 
 /** Runs 0 to 1 over the entrance of a screen or sheet face. Read it inside [rise] only. */
 @Composable
-fun rememberEntrance(millis: Int = 900): State<Float> {
-    val a = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { a.animateTo(1f, tween(if (MotionState.reduced) 1 else millis, easing = LinearEasing)) }
+fun rememberEntrance(millis: Int = 900, key: String? = null): State<Float> {
+    // With a [key], the entrance plays the first time that page appears in this run of the app. Coming back to it
+    // (switching tabs) shows it settled at once, so nothing re-plays as if the page had just loaded.
+    val seen = key != null && key in EntranceMemo.played
+    val a = remember { Animatable(if (seen) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (key != null) EntranceMemo.played.add(key)
+        if (a.value < 1f) a.animateTo(1f, tween(if (MotionState.reduced) 1 else millis, easing = LinearEasing))
+    }
     return a.asState()
+}
+
+/** Which keyed entrances have already played since the app opened. Lives as long as the process, not the screen. */
+object EntranceMemo {
+    val played = mutableSetOf<String>()
 }
 
 /** Slides a row up into place. [index] sets how late in the entrance it starts. */

@@ -39,9 +39,11 @@ internal fun PageScaffold(
     entranceMillis: Int = 900,
     /** A tab page laid out in [TwoColumns]: on a big screen it gets the full wide width. */
     wide: Boolean = false,
+    /** Names this page so its entrance plays once per app run, not on every visit (tab pages pass one). */
+    key: String? = null,
     content: @Composable ColumnScope.(State<Float>) -> Unit,
 ) {
-    val entrance = rememberEntrance(entranceMillis)
+    val entrance = rememberEntrance(entranceMillis, key)
     val rail = useRail()
     Column(
         Modifier

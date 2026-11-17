@@ -134,6 +134,8 @@ fun LockInApp(repo: AuthRepository) {
                         (context.applicationContext as LockInApplication).permissionsOffered = false
                         // Nobody is paired on this phone any more, so nothing is held back.
                         com.godbless.lockin.lock.Protection.clear(context)
+                        com.godbless.lockin.home.Identity.load(context)
+                        com.godbless.lockin.home.Identity.reset()
                         repo.signOut()
                         goWelcome()
                     }

@@ -118,6 +118,11 @@ internal class YouState(
         }
     }
 
+    /** Sends your avatar to the server; until it takes, the change stays marked as unsent and is retried. */
+    fun saveAvatar(spec: com.godbless.lockin.data.AvatarSpec) {
+        scope.launch { repo.setAvatar(spec).onSuccess { Identity.markPushed() } }
+    }
+
     val displayName: String get() = name.trim().ifEmpty { "Climber" }
     val email: String get() = profile?.email?.ifBlank { null } ?: auth.userEmail()
     val sinceText: String
@@ -128,6 +133,7 @@ internal class YouState(
             loadFailed = false
             profile = p
             sound = p.sound
+            Identity.adopt(p.avatar)
             if (p.name.isNotBlank() && p.name != name) {
                 name = p.name
                 auth.setUserName(p.name)
@@ -252,7 +258,7 @@ internal fun EditProfilePage(you: YouState, onBack: () -> Unit) {
     LaunchedEffect(Unit) { you.error = null }
     YouSubFrame("Profile", "How your partner sees you.", onBack) { entrance ->
         Row(Modifier.fillMaxWidth().rise(entrance, 1), verticalAlignment = Alignment.CenterVertically) {
-            Avatar(draft.ifBlank { you.displayName }, boxSize = 72.dp, filled = true, ring = LockInColors.Ink, tint = Identity.tint, glyph = Identity.glyph)
+            Avatar(draft.ifBlank { you.displayName }, boxSize = 72.dp, filled = true, ring = LockInColors.Ink, me = true)
             Column(Modifier.padding(start = 14.dp)) {
                 Text(draft.trim().ifEmpty { you.displayName }, style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 28.sp), maxLines = 1)
                 Text(you.sinceText, style = LockInText.Small.copy(color = LockInColors.Mist))
