@@ -3,6 +3,7 @@
 package com.godbless.lockin.home
 
 import com.godbless.lockin.ui.firstGlyph
+import com.godbless.lockin.ui.handoffSwap
 import com.godbless.lockin.ui.safeTake
 import com.godbless.lockin.ui.calmFloat
 import android.content.Intent
@@ -113,10 +114,7 @@ internal fun CrewTab(crew: CrewState, onOpenChat: () -> Unit) {
                 c == null -> 1
                 else -> 2
             },
-            transitionSpec = {
-                (slideInVertically(tween(360, easing = UiGlide)) { it / 4 } togetherWith slideOutVertically(tween(260, easing = UiGlide)) { -it / 4 })
-                    .using(SizeTransform(clip = true))
-            },
+            transitionSpec = { handoffSwap(ms = 360) },
             label = "crew-tab",
         ) { stage ->
             Column(Modifier.fillMaxWidth()) {
@@ -565,10 +563,7 @@ private fun SessionCard(state: CrewState, c: Crew, modifier: Modifier = Modifier
     ) {
         AnimatedContent(
             targetState = stage,
-            transitionSpec = {
-                (slideInVertically(tween(320, easing = UiGlide)) { it / 3 } togetherWith slideOutVertically(tween(240, easing = UiGlide)) { -it / 3 })
-                    .using(SizeTransform(clip = true))
-            },
+            transitionSpec = { handoffSwap(ms = 320) },
             label = "crew-session",
         ) { shown ->
             Column(Modifier.fillMaxWidth()) {

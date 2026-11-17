@@ -1,6 +1,7 @@
 package com.godbless.lockin.home
 
 import android.app.Activity
+import com.godbless.lockin.ui.handoffSwap
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.animation.AnimatedContent
@@ -272,10 +273,7 @@ internal fun LockScreen(
             AnimatedContent(
                 targetState = stage,
                 modifier = Modifier.fillMaxWidth().padding(top = topInset).clipToBounds(),
-                transitionSpec = {
-                    slideInVertically(tween(380, easing = UiGlide)) { it } togetherWith
-                        slideOutVertically(tween(380, easing = UiGlide)) { -it }
-                },
+                transitionSpec = { handoffSwap(ms = 380) },
                 label = "lock-top",
             ) { s ->
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -309,10 +307,8 @@ internal fun LockScreen(
             AnimatedContent(
                 targetState = stage,
                 modifier = Modifier.fillMaxWidth(),
-                transitionSpec = {
-                    slideInVertically(tween(380, easing = UiGlide)) { it } togetherWith
-                        slideOutVertically(tween(380, easing = UiGlide)) { it }
-                },
+                // The old controls drop away and the new ones rise from below, one after the other.
+                transitionSpec = { handoffSwap(dirIn = 1, dirOut = 1, ms = 380) },
                 label = "lock-bottom",
             ) { s ->
                 Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 28.dp)) {

@@ -3,6 +3,7 @@
 package com.godbless.lockin.home
 
 import android.content.Context
+import com.godbless.lockin.ui.handoffSwap
 import android.content.Intent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -151,7 +152,7 @@ internal fun AchievementsCard(stats: Stats, modifier: Modifier = Modifier) {
         }
         AnimatedContent(
             targetState = picked,
-            transitionSpec = { (slideInVertically(spring(1f, 500f)) { it / 2 } togetherWith slideOutVertically(spring(1f, 500f)) { -it / 2 }).using(null) },
+            transitionSpec = { handoffSwap(ms = 280) },
             label = "badge-detail",
         ) { i ->
             val b = i?.let { badges.getOrNull(it) }
@@ -373,7 +374,7 @@ internal fun YearPage(stats: Stats, goalMin: Int, onBack: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             AnimatedContent(
                 targetState = sel,
-                transitionSpec = { (slideInVertically(spring(1f, 500f)) { it / 2 } togetherWith slideOutVertically(spring(1f, 500f)) { -it / 2 }).using(null) },
+                transitionSpec = { handoffSwap(ms = 280) },
                 label = "year-detail",
             ) { day ->
                 val secs = stats.dayTotals[day] ?: 0

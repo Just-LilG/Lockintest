@@ -1,6 +1,7 @@
 package com.godbless.lockin.intro
 
 import com.godbless.lockin.ui.readable
+import com.godbless.lockin.ui.handoffSwap
 import com.godbless.lockin.ui.Widths
 import com.godbless.lockin.ui.isTablet
 import androidx.compose.foundation.Canvas
@@ -443,10 +444,7 @@ fun IntroWelcomeScreen(
                 // While signing back in, the line says what is happening. It slides, it doesn't fade.
                 AnimatedContent(
                     targetState = if (continuing) (if (slowWait) 2 else 1) else 0,
-                    transitionSpec = {
-                        slideInVertically(tween(300, easing = Glide)) { it / 2 } togetherWith
-                            slideOutVertically(tween(300, easing = Glide)) { -it / 2 }
-                    },
+                    transitionSpec = { handoffSwap() },
                     label = "welcome-line",
                 ) { phase ->
                     Text(

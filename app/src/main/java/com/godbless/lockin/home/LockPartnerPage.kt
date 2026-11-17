@@ -3,6 +3,7 @@
 package com.godbless.lockin.home
 
 import com.godbless.lockin.ui.firstGlyph
+import com.godbless.lockin.ui.handoffSwap
 import com.godbless.lockin.ui.calmFloat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
@@ -294,10 +295,7 @@ internal fun LockPartnerPage(lock: LockState, usage: UsageState, onBack: () -> U
             AnimatedContent(
                 targetState = stage,
                 modifier = Modifier.fillMaxWidth().clipToBounds().rise(entrance, 1),
-                transitionSpec = {
-                    slideInVertically(tween(320, easing = UiGlide)) { it } togetherWith
-                        slideOutVertically(tween(320, easing = UiGlide)) { -it }
-                },
+                transitionSpec = { handoffSwap(ms = 320) },
                 label = "lock-page-top",
             ) { shownStage ->
                 val t = lock.theirs

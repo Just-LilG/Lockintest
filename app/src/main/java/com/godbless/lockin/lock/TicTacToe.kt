@@ -1,6 +1,7 @@
 package com.godbless.lockin.lock
 
 import android.os.SystemClock
+import com.godbless.lockin.ui.handoffSwap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -327,10 +328,7 @@ internal fun TicTacToe(
         }
         AnimatedContent(
             targetState = headline,
-            transitionSpec = {
-                (slideInVertically(tween(240, easing = UiGlide)) { it / 2 } togetherWith slideOutVertically(tween(200, easing = UiGlide)) { -it / 2 })
-                    .using(null)
-            },
+            transitionSpec = { handoffSwap() },
             label = "ttt-head",
         ) { t ->
             Text(

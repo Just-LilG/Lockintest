@@ -1,6 +1,7 @@
 package com.godbless.lockin.study
 
 import com.godbless.lockin.ui.calmFloat
+import com.godbless.lockin.ui.pushSwap
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
@@ -518,10 +519,7 @@ internal fun ReaderAiSheet(
         Spacer(Modifier.height(14.dp))
         AnimatedContent(
             targetState = task,
-            transitionSpec = {
-                (slideInHorizontally(tween(300, easing = UiGlide)) { it / 2 } togetherWith slideOutHorizontally(tween(240, easing = UiGlide)) { -it / 2 })
-                    .using(SizeTransform(clip = true))
-            },
+            transitionSpec = { pushSwap(vertical = false) },
             label = "ai-task",
         ) { t ->
             Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {

@@ -253,10 +253,7 @@ fun LockInButton(
     ) {
         AnimatedContent(
             targetState = if (success) 2 else if (loading) 1 else 0,
-            transitionSpec = {
-                slideInVertically(tween(260, easing = UiGlide)) { it } togetherWith
-                    slideOutVertically(tween(260, easing = UiGlide)) { -it }
-            },
+            transitionSpec = { pushSwap(vertical = true, ms = 260) },
             label = "button-state",
         ) { state ->
             when (state) {

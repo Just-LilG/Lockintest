@@ -49,8 +49,8 @@ android {
         applicationId = "com.godbless.lockin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 74
-        versionName = "0.28.0"
+        versionCode = 75
+        versionName = "0.28.1"
 
         // Phones only: x86 is just emulators and Chromebooks, so the APK skips it. (Remove this line to run on an x86 emulator.)
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }

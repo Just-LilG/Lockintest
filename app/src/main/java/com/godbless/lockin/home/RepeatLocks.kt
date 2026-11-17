@@ -3,6 +3,7 @@
 package com.godbless.lockin.home
 
 import androidx.compose.animation.AnimatedContent
+import com.godbless.lockin.ui.handoffSwap
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -96,10 +97,7 @@ internal fun RepeatsSection(lock: LockState, modifier: Modifier = Modifier) {
         }
         AnimatedContent(
             targetState = adding,
-            transitionSpec = {
-                (slideInVertically(tween(320, easing = UiGlide)) { it / 3 } togetherWith slideOutVertically(tween(240, easing = UiGlide)) { -it / 3 })
-                    .using(null)
-            },
+            transitionSpec = { handoffSwap(ms = 320) },
             modifier = Modifier.clipToBounds(),
             label = "repeat-add",
         ) { open ->

@@ -1,6 +1,8 @@
 package com.godbless.lockin.home
 
 import com.godbless.lockin.ui.calmFloat
+import com.godbless.lockin.ui.pushSwap
+import com.godbless.lockin.ui.handoffSwap
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
@@ -163,11 +165,7 @@ internal fun PairingPage(state: PartnerState, onScan: () -> Unit) {
                 targetState = tab,
                 modifier = Modifier.fillMaxWidth().clipToBounds(),
                 // The tabs slide side by side (no fading), in the direction you moved.
-                transitionSpec = {
-                    val way = if (targetState > initialState) 1 else -1
-                    (slideInHorizontally(tween(300, easing = UiGlide)) { it * way } togetherWith
-                        slideOutHorizontally(tween(300, easing = UiGlide)) { -it * way }).using(null)
-                },
+                transitionSpec = { pushSwap(vertical = false, dir = if (targetState > initialState) 1 else -1) },
                 label = "pair-tab",
             ) { t ->
                 if (t == 0) MyCode(state) else EnterCode(state, code, onCode = { code = it }, onScan = onScan)
@@ -283,10 +281,7 @@ private fun MyCode(state: PartnerState) {
         targetState = state.pairing,
         modifier = Modifier.fillMaxWidth().clipToBounds(),
         contentKey = { it::class },
-        transitionSpec = {
-            (slideInVertically(tween(320, easing = UiGlide)) { it / 2 } togetherWith
-                slideOutVertically(tween(280, easing = UiGlide)) { -it / 2 }).using(null)
-        },
+        transitionSpec = { handoffSwap(ms = 320) },
         label = "invite",
     ) { p ->
         when (p) {
@@ -501,10 +496,7 @@ internal fun UnpairCard(partner: PartnerState, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         androidx.compose.animation.AnimatedContent(
             targetState = paired.unpairBy,
-            transitionSpec = {
-                (androidx.compose.animation.slideInVertically(tween(320, easing = UiGlide)) { it / 2 } togetherWith
-                    androidx.compose.animation.slideOutVertically(tween(260, easing = UiGlide)) { -it / 2 }).using(null)
-            },
+            transitionSpec = { handoffSwap(ms = 320) },
             label = "unpair",
         ) { by ->
             when (by) {

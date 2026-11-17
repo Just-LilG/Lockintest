@@ -1,6 +1,7 @@
 package com.godbless.lockin.home
 
 import android.content.Intent
+import com.godbless.lockin.ui.pushSwap
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -1435,10 +1436,8 @@ private fun MessageRow(
                     if (mine && latestMine && !m.deleted) {
                         AnimatedContent(
                             targetState = m.seen,
-                            transitionSpec = {
-                                (slideInVertically(spring(dampingRatio = 0.8f, stiffness = 500f)) { it }) togetherWith
-                                    (slideOutVertically(spring(stiffness = 600f)) { -it })
-                            },
+                            transitionSpec = { pushSwap(vertical = true, ms = 240) },
+                            modifier = Modifier.clipToBounds(),
                             label = "seen",
                         ) { seenNow ->
                             Text(
