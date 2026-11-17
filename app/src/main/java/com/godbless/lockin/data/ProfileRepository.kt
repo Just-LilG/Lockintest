@@ -28,6 +28,7 @@ class ProfileRepository(internal val partners: PartnerRepository) {
             .put("p_seed", spec.seed)
             .put("p_color", spec.color)
             .put("p_glyph", spec.glyph)
+            .put("p_look", spec.look)
         partners.call("POST", "/rest/v1/rpc/set_avatar", body.toString())
         Unit
     }

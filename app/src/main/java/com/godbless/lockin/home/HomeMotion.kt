@@ -60,6 +60,7 @@ internal fun StaggerText(text: String, style: TextStyle, modifier: Modifier = Mo
             val lift = remember(text) { Animatable(if (settled) 0f else 1f) }
             LaunchedEffect(text) {
                 if (settled) return@LaunchedEffect
+                com.godbless.lockin.ui.EntranceGate.open()
                 delay(if (com.godbless.lockin.ui.MotionState.reduced) 0L else startDelay + i * 45L)
                 lift.animateTo(0f, homeSpring(bouncy = true))
             }
@@ -80,6 +81,7 @@ internal fun rememberPop(delayMillis: Long, key: String? = null): State<Float> {
     LaunchedEffect(Unit) {
         if (key != null) HomeIntro.played.add(key)
         if (a.value >= 1f) return@LaunchedEffect
+        com.godbless.lockin.ui.EntranceGate.open()
         delay(if (com.godbless.lockin.ui.MotionState.reduced) 0L else delayMillis)
         a.animateTo(1f, homeSpring(bouncy = true))
     }
@@ -114,6 +116,7 @@ internal fun rememberSlideIn(go: Boolean, index: Int, fromRight: Boolean = true,
         if (key != null) HomeIntro.played.add(key)
         if (a.value <= 0f) return@LaunchedEffect
         launch {
+            com.godbless.lockin.ui.EntranceGate.open()
             delay(index * 90L)
             a.animateTo(0f, homeSpring())
         }
@@ -132,6 +135,7 @@ internal fun WavingHand(modifier: Modifier = Modifier) {
         if (com.godbless.lockin.ui.MotionState.reduced) return@LaunchedEffect
         if (HomeIntro.played.contains("wave")) return@LaunchedEffect
         HomeIntro.played.add("wave")
+        com.godbless.lockin.ui.EntranceGate.open()
         delay(500)
         for (target in floatArrayOf(22f, -12f, 20f, -8f, 14f, 0f)) {
             angle.animateTo(target, androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.FastOutSlowInEasing))

@@ -7,6 +7,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.expandVertically
@@ -54,6 +57,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -329,88 +334,216 @@ private fun Chip(text: String, picked: Boolean, onClick: () -> Unit) {
 @Composable
 internal fun AvatarSheet(visible: Boolean, name: String, partnerId: String?, partnerRealName: String, onDismiss: () -> Unit) {
     OverlaySheet(visible, onDismiss) {
+        val haptic = LocalHapticFeedback.current
         var color by remember { mutableIntStateOf(Identity.avatarColor) }
         var glyph by remember { mutableStateOf(Identity.avatarGlyph) }
         var style by remember { mutableStateOf(Identity.avatarStyle) }
-        var seed by remember { mutableStateOf(Identity.avatarSeed) }
+        var look by remember { mutableStateOf(Identity.avatarLook) }
+        var seed by remember { mutableStateOf(Identity.avatarSeed.ifBlank { Identity.defaultSeed }.ifBlank { DiceBear.seedFor(name) }) }
+        var options by remember { mutableStateOf(listOf(seed) + List(7) { DiceBear.randomSeed() }) }
+        var spins by remember { mutableIntStateOf(0) }
         var nick by remember { mutableStateOf(Identity.nickname(partnerId).orEmpty()) }
+        fun tick() = haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
 
-        Text("Your avatar", style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 30.sp))
-        Text("Your partner and your crew see this too.", style = LockInText.Small.copy(color = LockInColors.Mist))
-        Spacer(Modifier.height(16.dp))
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Avatar(
-                name, boxSize = 84.dp, filled = true, ring = LockInColors.Slate,
-                tint = AvatarColors.getOrNull(color), glyph = glyph.ifBlank { null },
-                me = true, previewStyle = style, previewSeed = seed,
-            )
+        val styleLabel = DiceBear.Styles.firstOrNull { it.first == style }?.second
+        val bump = remember { androidx.compose.animation.core.Animatable(1f) }
+        androidx.compose.runtime.LaunchedEffect(style, seed, look) {
+            bump.snapTo(0.9f)
+            bump.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 300f))
         }
-        Spacer(Modifier.height(16.dp))
-        // Illustrated styles, each drawn with your current shuffle code, and "Classic" for a colour and symbol.
-        FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            DiceBear.Styles.forEach { (id, label) ->
-                Box(
-                    Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .then(if (style == id) Modifier.border(3.dp, LockInColors.Lime, CircleShape) else Modifier)
-                        .clickable(role = Role.RadioButton) { style = id }
-                        .semantics { contentDescription = "$label style"; selected = style == id },
-                    contentAlignment = Alignment.Center,
-                ) { Avatar(name, boxSize = 46.dp, ring = LockInColors.Slate, me = true, previewStyle = id, previewSeed = seed) }
-            }
+        val spin by animateFloatAsState(spins * 360f, tween(520, easing = UiGlide), label = "shuffleSpin")
+
+        Text("Your avatar", style = LockInText.Title.copy(fontSize = 26.sp, lineHeight = 32.sp))
+        Text("This is how your partner and crew see you.", style = LockInText.Small.copy(color = LockInColors.Mist))
+        Spacer(Modifier.height(20.dp))
+
+        // The preview.
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             Box(
                 Modifier
-                    .size(52.dp)
-                    .clip(CircleShape)
-                    .background(LockInColors.Graphite)
-                    .then(if (style.isEmpty()) Modifier.border(3.dp, LockInColors.Lime, CircleShape) else Modifier)
-                    .clickable(role = Role.RadioButton) { style = "" }
-                    .semantics { contentDescription = "Classic: colour and symbol"; selected = style.isEmpty() },
+                    .size(148.dp)
+                    .drawBehind {
+                        drawCircle(
+                            androidx.compose.ui.graphics.Brush.radialGradient(
+                                listOf(LockInColors.Lime.copy(alpha = 0.22f), Color.Transparent),
+                                radius = size.minDimension / 2f,
+                            ),
+                        )
+                    },
                 contentAlignment = Alignment.Center,
-            ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 18.sp)) }
-        }
-        if (style.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                SmallPill("Shuffle", { seed = DiceBear.randomSeed() })
-            }
-        } else {
-            Spacer(Modifier.height(16.dp))
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                AvatarColors.forEachIndexed { i, c ->
-                    Box(
-                        Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(c)
-                            .then(if (color == i) Modifier.border(3.dp, LockInColors.Snow, CircleShape) else Modifier)
-                            .clickable(role = Role.RadioButton) { color = i }
-                            .semantics { contentDescription = "Colour ${i + 1}"; selected = color == i },
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ) {
                 Box(
                     Modifier
-                        .size(44.dp)
+                        .size(120.dp)
+                        .graphicsLayer { scaleX = bump.value; scaleY = bump.value }
                         .clip(CircleShape)
-                        .background(if (glyph.isBlank()) LockInColors.LimeWash else LockInColors.Graphite)
-                        .clickable(role = Role.RadioButton) { glyph = "" }
-                        .semantics { contentDescription = "Use my initial"; selected = glyph.isBlank() },
-                    contentAlignment = Alignment.Center,
-                ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp)) }
-                AvatarGlyphs.forEach { g ->
+                        .background(LockInColors.Slate)
+                        .border(3.dp, LockInColors.Lime, CircleShape)
+                        .padding(5.dp)
+                        .clip(CircleShape),
+                ) {
+                    if (style.isNotEmpty()) {
+                        DiceImage(style, seed, look, Modifier.fillMaxSize())
+                    } else {
+                        Avatar(
+                            name, boxSize = 110.dp, filled = true, ring = LockInColors.Slate,
+                            tint = AvatarColors.getOrNull(color), glyph = glyph.ifBlank { null },
+                            me = true, previewStyle = "", previewSeed = seed,
+                        )
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            name.trim().ifEmpty { "You" },
+            style = LockInText.Label.copy(fontSize = 18.sp),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            when {
+                style.isEmpty() -> "Colour and symbol"
+                else -> listOfNotNull(styleLabel, when (look) { "m" -> "Male"; "f" -> "Female"; else -> null }).joinToString(" · ")
+            },
+            style = LockInText.Small.copy(color = LockInColors.Mist),
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+        )
+        Spacer(Modifier.height(22.dp))
+
+        // Male, Female or everything.
+        LookSegments(look, onChange = { picked ->
+            if (picked != look) {
+                tick()
+                look = picked
+                // Keep a style that can be steered; otherwise move to the first one that can.
+                if (style.isNotEmpty() && picked.isNotEmpty() && !DiceBear.supportsLook(style)) style = DiceBear.Styles.first { DiceBear.supportsLook(it.first) }.first
+            }
+        })
+        Spacer(Modifier.height(20.dp))
+
+        // Style.
+        Text("Style", style = LockInText.Label.copy(fontSize = 15.sp, color = LockInColors.Silver), modifier = Modifier.padding(start = 4.dp, bottom = 6.dp))
+        AnimatedContent(
+            targetState = look,
+            transitionSpec = { (fadeIn(tween(220)) + slideInVertically(tween(260)) { it / 6 }) togetherWith fadeOut(tween(120)) },
+            label = "styleRow",
+        ) { l ->
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                DiceBear.Styles.filter { l.isEmpty() || DiceBear.supportsLook(it.first) }.forEach { (id, label) ->
+                    StyleCard(id, label, seed, l, chosen = style == id, onClick = { tick(); style = id })
+                }
+                if (l.isEmpty()) {
+                    // Classic: a colour and a symbol.
+                    Column(
+                        Modifier
+                            .width(76.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable(role = Role.RadioButton) { tick(); style = "" }
+                            .padding(vertical = 6.dp)
+                            .semantics { contentDescription = "Colour and symbol"; selected = style.isEmpty() },
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(62.dp)
+                                .clip(CircleShape)
+                                .background(AvatarColors.getOrNull(color) ?: LockInColors.Graphite)
+                                .then(if (style.isEmpty()) Modifier.border(3.dp, LockInColors.Lime, CircleShape) else Modifier),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(glyph.ifBlank { name.trim().take(1).uppercase().ifEmpty { "A" } }, fontSize = 24.sp, color = if (AvatarColors.getOrNull(color) != null) LockInColors.Ink else LockInColors.Snow) }
+                        Text("Classic", style = LockInText.Small.copy(fontSize = 12.sp, color = if (style.isEmpty()) LockInColors.Lime else LockInColors.Silver), modifier = Modifier.padding(top = 6.dp))
+                    }
+                }
+            }
+        }
+
+        // Look choices for the chosen style, or the colour and symbol editors for Classic.
+        AnimatedVisibility(
+            visible = style.isNotEmpty(),
+            enter = fadeIn(tween(220)) + expandVertically(tween(300)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(220)),
+        ) {
+            Column {
+                Spacer(Modifier.height(18.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Choose a look", style = LockInText.Label.copy(fontSize = 15.sp, color = LockInColors.Silver), modifier = Modifier.padding(start = 4.dp))
+                        Text("Tap one, or shuffle for more.", style = LockInText.Small.copy(color = LockInColors.Mist), modifier = Modifier.padding(start = 4.dp, top = 2.dp))
+                    }
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(LockInColors.Graphite)
+                            .clickable(role = Role.Button) {
+                                tick()
+                                spins++
+                                options = List(8) { DiceBear.randomSeed() }
+                                seed = options.first()
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .semantics { contentDescription = "Shuffle looks" },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("\uD83C\uDFB2", fontSize = 16.sp, modifier = Modifier.graphicsLayer { rotationZ = spin })
+                        Text("Shuffle", style = LockInText.Label.copy(fontSize = 14.sp), modifier = Modifier.padding(start = 8.dp))
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                options.chunked(4).forEachIndexed { row, group ->
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                        group.forEachIndexed { i, s ->
+                            LookCell(style, s, look, row * 4 + i, chosen = s == seed, onClick = { tick(); seed = s })
+                        }
+                    }
+                }
+            }
+        }
+        AnimatedVisibility(
+            visible = style.isEmpty(),
+            enter = fadeIn(tween(220)) + expandVertically(tween(300)),
+            exit = fadeOut(tween(120)) + shrinkVertically(tween(220)),
+        ) {
+            Column {
+                Spacer(Modifier.height(18.dp))
+                Text("Colour", style = LockInText.Label.copy(fontSize = 15.sp, color = LockInColors.Silver), modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AvatarColors.forEachIndexed { i, c ->
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(c)
+                                .then(if (color == i) Modifier.border(3.dp, LockInColors.Snow, CircleShape) else Modifier)
+                                .clickable(role = Role.RadioButton) { tick(); color = i }
+                                .semantics { contentDescription = "Colour ${i + 1}"; selected = color == i },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text("Symbol", style = LockInText.Label.copy(fontSize = 15.sp, color = LockInColors.Silver), modifier = Modifier.padding(start = 4.dp, bottom = 10.dp))
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
                         Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(if (glyph == g) LockInColors.LimeWash else LockInColors.Graphite)
-                            .clickable(role = Role.RadioButton) { glyph = g }
-                            .semantics { contentDescription = "Symbol $g"; selected = glyph == g },
+                            .background(if (glyph.isBlank()) LockInColors.LimeWash else LockInColors.Graphite)
+                            .clickable(role = Role.RadioButton) { tick(); glyph = "" }
+                            .semantics { contentDescription = "Use my initial"; selected = glyph.isBlank() },
                         contentAlignment = Alignment.Center,
-                    ) { Text(g, fontSize = 20.sp) }
+                    ) { Text(name.trim().take(1).uppercase().ifEmpty { "A" }, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp)) }
+                    AvatarGlyphs.forEach { g ->
+                        Box(
+                            Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (glyph == g) LockInColors.LimeWash else LockInColors.Graphite)
+                                .clickable(role = Role.RadioButton) { tick(); glyph = g }
+                                .semantics { contentDescription = "Symbol $g"; selected = glyph == g },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(g, fontSize = 20.sp) }
+                    }
                 }
             }
         }
@@ -426,8 +559,8 @@ internal fun AvatarSheet(visible: Boolean, name: String, partnerId: String?, par
             Text("A private nickname. $partnerRealName never sees it.", style = LockInText.Small, modifier = Modifier.padding(start = 8.dp, top = 4.dp))
         }
         Spacer(Modifier.height(20.dp))
-        LockInButton("Done", onClick = {
-            Identity.setAvatar(color, glyph, style, seed)
+        LockInButton("Save avatar", onClick = {
+            Identity.setAvatar(color, glyph, style, seed, look)
             if (partnerId != null) Identity.setNickname(partnerId, nick)
             onDismiss()
         })

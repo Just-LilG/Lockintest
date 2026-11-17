@@ -33,15 +33,21 @@ internal object Identity {
     /** A DiceBear style for your illustrated avatar, or "" for the classic colour-and-symbol one. */
     var avatarStyle by mutableStateOf(DiceBear.DefaultStyle)
         private set
-    /** The shuffle code for your illustrated avatar; blank means the one your name gives. */
+    /** Narrows an illustrated style: "" for any, "m" or "f". */
+    var avatarLook by mutableStateOf("")
+        private set
+    /** The shuffle code for your illustrated avatar; blank means the one your account gives ([defaultSeed]). */
     var avatarSeed by mutableStateOf("")
+        private set
+    /** The code the server derives from your account, so you look the same on every phone and nobody shares it. */
+    var defaultSeed by mutableStateOf("")
         private set
     private val nicks = mutableStateMapOf<String, String>()
 
     /** Set by the Home screen: sends a change to the server so your partner and crew see it. */
     var syncUp: ((com.godbless.lockin.data.AvatarSpec) -> Unit)? = null
 
-    fun spec() = com.godbless.lockin.data.AvatarSpec(avatarStyle, avatarSeed, avatarColor, avatarGlyph)
+    fun spec() = com.godbless.lockin.data.AvatarSpec(avatarStyle, avatarSeed, avatarColor, avatarGlyph, avatarLook)
 
     val tint: Color? get() = AvatarColors.getOrNull(avatarColor)
     val glyph: String? get() = avatarGlyph.ifBlank { null }
@@ -55,17 +61,22 @@ internal object Identity {
         // Someone who already chose a colour or symbol keeps it; everyone else gets the illustrated avatar.
         avatarStyle = p.getString("avatar_style", null) ?: if (avatarColor >= 0 || avatarGlyph.isNotBlank()) "" else DiceBear.DefaultStyle
         avatarSeed = p.getString("avatar_seed", "").orEmpty()
+        defaultSeed = p.getString("avatar_default_seed", "").orEmpty()
+        avatarLook = p.getString("avatar_look", "").orEmpty()
         p.all.forEach { (k, v) -> if (k.startsWith("nick_") && v is String && v.isNotBlank()) nicks[k.removePrefix("nick_")] = v }
     }
 
-    fun setAvatar(color: Int, glyph: String, style: String = avatarStyle, seed: String = avatarSeed) {
+    fun setAvatar(color: Int, glyph: String, style: String = avatarStyle, seed: String = avatarSeed, look: String = avatarLook) {
+        // Save the code in use, not "blank", so your partner's phone draws exactly what you see.
+        val code = seed.ifBlank { defaultSeed }
         avatarColor = color
         avatarGlyph = glyph
         avatarStyle = style
-        avatarSeed = seed
+        avatarSeed = code
+        avatarLook = look
         // "dirty" stays set until the server has it, so a later refresh can't overwrite a change that didn't go through.
         prefs?.edit()?.putInt("avatar_color", color)?.putString("avatar_glyph", glyph)
-            ?.putString("avatar_style", style)?.putString("avatar_seed", seed)?.putBoolean("avatar_dirty", true)?.apply()
+            ?.putString("avatar_style", style)?.putString("avatar_seed", code)?.putString("avatar_look", look)?.putBoolean("avatar_dirty", true)?.apply()
         syncUp?.invoke(spec())
     }
 
@@ -75,7 +86,9 @@ internal object Identity {
         avatarGlyph = ""
         avatarStyle = DiceBear.DefaultStyle
         avatarSeed = ""
-        prefs?.edit()?.remove("avatar_color")?.remove("avatar_glyph")?.remove("avatar_style")?.remove("avatar_seed")
+        defaultSeed = ""
+        avatarLook = ""
+        prefs?.edit()?.remove("avatar_look")?.remove("avatar_default_seed")?.remove("avatar_color")?.remove("avatar_glyph")?.remove("avatar_style")?.remove("avatar_seed")
             ?.remove("avatar_dirty")?.apply()
     }
 
@@ -88,6 +101,10 @@ internal object Identity {
      */
     fun adopt(server: com.godbless.lockin.data.AvatarSpec?) {
         if (server == null) return
+        if (server.seed.isNotBlank() && server.seed != defaultSeed && server.style == null) {
+            defaultSeed = server.seed
+            prefs?.edit()?.putString("avatar_default_seed", defaultSeed)?.apply()
+        }
         val dirty = prefs?.getBoolean("avatar_dirty", false) == true
         val localChoice = prefs?.contains("avatar_style") == true || avatarColor >= 0 || avatarGlyph.isNotBlank()
         val serverStyle = server.style
@@ -98,8 +115,10 @@ internal object Identity {
             avatarGlyph = server.glyph
             avatarStyle = serverStyle
             avatarSeed = server.seed
+            avatarLook = server.look
             prefs?.edit()?.putInt("avatar_color", avatarColor)?.putString("avatar_glyph", avatarGlyph)
-                ?.putString("avatar_style", avatarStyle)?.putString("avatar_seed", avatarSeed)?.apply()
+                ?.putString("avatar_style", avatarStyle)?.putString("avatar_seed", avatarSeed)
+                ?.putString("avatar_look", avatarLook)?.apply()
         }
     }
 

@@ -92,16 +92,19 @@ internal fun Avatar(
     /** Picker preview only: show this style ("" for classic) and shuffle code instead of the saved ones. */
     previewStyle: String? = null,
     previewSeed: String? = null,
+    previewLook: String? = null,
 ) {
     // You get what you picked. Everyone else is drawn from what the server says they picked (AvatarBook), or by DiceBear's
     // default style from a hash of their first name if they never chose.
     var style: String
     var seed = DiceBear.seedFor(letter)
+    var look = ""
     var useTint = tint
     var useGlyph = glyph
     if (me) {
         style = previewStyle ?: Identity.avatarStyle
-        seed = (previewSeed ?: Identity.avatarSeed).ifBlank { seed }
+        look = previewLook ?: Identity.avatarLook
+        seed = (previewSeed ?: Identity.avatarSeed).ifBlank { Identity.defaultSeed.ifBlank { seed } }
         if (previewStyle == null) {
             useTint = tint ?: Identity.tint
             useGlyph = glyph ?: Identity.glyph
@@ -109,8 +112,11 @@ internal fun Avatar(
     } else if (tint == null && glyph == null) {
         val spec = com.godbless.lockin.data.AvatarBook[letter]
         val specStyle = spec?.style
-        if (spec == null || specStyle == null) {
+        if (spec == null) {
             style = DiceBear.DefaultStyle
+        } else if (specStyle == null) {
+            style = DiceBear.DefaultStyle
+            seed = spec.seed.ifBlank { seed }
         } else if (specStyle.isEmpty()) {
             style = ""
             useTint = AvatarColors.getOrNull(spec.color)
@@ -119,11 +125,12 @@ internal fun Avatar(
             // Only styles this app knows are drawn; anything else (a newer app's style) falls back to the default.
             style = if (DiceBear.Styles.any { it.first == specStyle }) specStyle else DiceBear.DefaultStyle
             seed = spec.seed.ifBlank { seed }
+            look = spec.look
         }
     } else {
         style = ""
     }
-    val art = if (style.isNotEmpty()) rememberDiceBear(style, seed) else null
+    val art = if (style.isNotEmpty()) rememberDiceBear(style, seed, look) else null
     val bg = useTint ?: if (filled) LockInColors.Snow else LockInColors.Graphite
     val fg = if (useTint != null) LockInColors.Ink else if (filled) LockInColors.Ink else LockInColors.Snow
     Box(
@@ -198,7 +205,7 @@ internal fun PartnerCard(name: String, youLetter: String, onNudge: () -> Unit, m
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(Modifier.size(width = 84.dp, height = 48.dp)) {
-            Avatar(youLetter, Modifier.align(Alignment.CenterStart), boxSize = 48.dp)
+            Avatar(youLetter, Modifier.align(Alignment.CenterStart), boxSize = 48.dp, me = true)
             Box(Modifier.align(Alignment.CenterEnd)) {
                 Avatar(name, boxSize = 48.dp, filled = true)
                 Box(
@@ -323,6 +330,7 @@ internal fun WeekRange(values: FloatArray, today: Int, goalHours: Float, modifie
         if (!visible) return@LaunchedEffect
         if (grow.value >= 1f) return@LaunchedEffect
         HomeIntro.weekGrown = true
+        com.godbless.lockin.ui.EntranceGate.open()
         delay(150)
         grow.animateTo(1f, tween(1300, easing = UiGlide))
     }

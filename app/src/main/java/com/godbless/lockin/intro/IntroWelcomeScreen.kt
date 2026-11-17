@@ -256,10 +256,15 @@ fun IntroWelcomeScreen(
             continuing = true
             scope.launch {
                 val r = repo.restore()
-                continuing = false
-                if (r is AuthResult.SignedIn) onSignedIn()
-                else continueNote = (r as? AuthResult.Failure)?.message
-                    ?: "Couldn't sign you back in. Use a different account."
+                if (r is AuthResult.SignedIn) {
+                    // Stay in "getting your partner's news" until Home is ready and the page moves; letting go here
+                    // flashed the button and the old line back for the moments Home spends loading.
+                    onSignedIn()
+                } else {
+                    continuing = false
+                    continueNote = (r as? AuthResult.Failure)?.message
+                        ?: "Couldn't sign you back in. Use a different account."
+                }
             }
         }
         val activity = context.findFragmentActivity()

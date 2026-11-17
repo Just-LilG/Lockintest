@@ -227,7 +227,7 @@ private fun PartnerPage0(
                 drawCircle(LockInColors.Slate, radius = 8.dp.toPx(), center = Offset(mid, cy + sag))
                 drawCircle(LockInColors.Lime, radius = 5.dp.toPx(), center = Offset(mid, cy + sag))
             }
-            RingAvatar(youName.trim().substringBefore(' ').ifEmpty { "You" }, stats.todaySeconds / goal.coerceAtLeast(1f), false, null, "You · ${heroMinutes(stats.todaySeconds / 60)}", Modifier.align(Alignment.TopStart))
+            RingAvatar(youName.trim().substringBefore(' ').ifEmpty { "You" }, stats.todaySeconds / goal.coerceAtLeast(1f), false, null, "You · ${heroMinutes(stats.todaySeconds / 60)}", Modifier.align(Alignment.TopStart), me = true)
             RingAvatar(name, stats.partnerTodaySeconds / theirGoal.coerceAtLeast(1f), true, active, heroMinutes(stats.partnerTodaySeconds / 60), Modifier.align(Alignment.TopEnd))
         }
         Text(name, style = LockInText.Title.copy(fontSize = 22.sp, lineHeight = 26.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -257,7 +257,7 @@ private fun PartnerPage0(
 
 /** An avatar inside a ring that fills with today's progress toward that person's goal. */
 @Composable
-private fun RingAvatar(letter: String, fraction: Float, filled: Boolean, online: Boolean?, caption: String, modifier: Modifier = Modifier) {
+private fun RingAvatar(letter: String, fraction: Float, filled: Boolean, online: Boolean?, caption: String, modifier: Modifier = Modifier, me: Boolean = false) {
     val fill by animateFloatAsState(fraction.coerceIn(0f, 1f), spring(dampingRatio = 0.8f, stiffness = 100f), label = "ring")
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.size(58.dp), contentAlignment = Alignment.Center) {
@@ -268,7 +268,7 @@ private fun RingAvatar(letter: String, fraction: Float, filled: Boolean, online:
                 drawArc(LockInColors.Graphite, 0f, 360f, false, tl, sz, style = Stroke(sw))
                 if (fill > 0f) drawArc(LockInColors.Lime, -90f, 360f * fill, false, tl, sz, style = Stroke(sw, cap = StrokeCap.Round))
             }
-            Avatar(letter, boxSize = 46.dp, filled = filled, ring = LockInColors.Slate)
+            Avatar(letter, boxSize = 46.dp, filled = filled, ring = LockInColors.Slate, me = me)
             if (online != null) {
                 Box(
                     Modifier

@@ -126,7 +126,11 @@ fun rememberEntrance(millis: Int = 900, key: String? = null): State<Float> {
     val a = remember { Animatable(if (seen) 1f else 0f) }
     LaunchedEffect(Unit) {
         if (key != null) EntranceMemo.played.add(key)
-        if (a.value < 1f) a.animateTo(1f, tween(if (MotionState.reduced) 1 else millis, easing = LinearEasing))
+        if (a.value < 1f) {
+            // Home built behind the welcome page waits for the move to begin, so its rows rise as the page uncovers them.
+            EntranceGate.open()
+            a.animateTo(1f, tween(if (MotionState.reduced) 1 else millis, easing = LinearEasing))
+        }
     }
     return a.asState()
 }

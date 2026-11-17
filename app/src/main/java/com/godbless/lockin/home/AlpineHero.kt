@@ -1,5 +1,6 @@
 package com.godbless.lockin.home
 
+import kotlinx.coroutines.flow.first
 import com.godbless.lockin.ui.calmFloat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
@@ -158,6 +159,10 @@ internal fun AlpineHero(
             if (target <= 0f) return@LaunchedEffect
             HomeIntro.countedMinutes = 0f
             firstCount = false
+            // The count starts when the number does: not while the welcome page still covers Home, and not during the
+            // move, when the number is still tucked away (it shows once the move has landed).
+            com.godbless.lockin.ui.EntranceGate.open()
+            androidx.compose.runtime.snapshotFlow { SceneHandoff.chromeShown }.first { it }
             kotlinx.coroutines.delay(350)
             counted.animateTo(target, tween(1300, easing = UiGlide))
         } else if (counted.value != target) {

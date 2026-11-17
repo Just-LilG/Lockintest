@@ -21,6 +21,10 @@ internal class SessionState(private val repo: SessionRepository, private val sco
     var stats by mutableStateOf(Stats.Empty)
         private set
 
+    /** True once the first refresh has finished, whether or not it reached the server. */
+    var loaded by mutableStateOf(false)
+        private set
+
     private var rows = emptyList<SessionRow>()
     private var totals = Totals.Empty
     private var unsent = emptyList<SessionRow>()
@@ -48,6 +52,7 @@ internal class SessionState(private val repo: SessionRepository, private val sco
         repo.recent().onSuccess { rows = it }
         repo.totals().onSuccess { totals = it }
         rebuild()
+        loaded = true
     }
 
     /**

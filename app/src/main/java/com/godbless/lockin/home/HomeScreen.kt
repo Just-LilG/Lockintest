@@ -599,6 +599,10 @@ fun HomeScreen(
             }
         }
     }
+    // The welcome page holds its move until the first picture of Home is the right one.
+    LaunchedEffect(partner.pairing is Pairing.Loading, history.loaded) {
+        if (partner.pairing !is Pairing.Loading && history.loaded) SceneHandoff.dataReady = true
+    }
     LaunchedEffect(partner.paired, partner.name) { history.setPartner(partner.name, partner.paired?.since) }
     LaunchedEffect(plans.restMask) { history.setRestDays(plans.restDays) }
     SideEffect { ClockPrefs.is24h = android.text.format.DateFormat.is24HourFormat(context) }
@@ -808,6 +812,7 @@ fun HomeScreen(
                     study = study,
                     onOpenTool = ::openTool,
                     paired = partner.paired != null,
+                    pairingKnown = partner.pairing !is Pairing.Loading,
                     partnerName = partner.name,
                     onInvite = { tab = 2 },
                     next = plans.next(System.currentTimeMillis()),
@@ -1352,6 +1357,8 @@ private fun HomeTab(
     study: StudyStore,
     onOpenTool: (Tool) -> Unit,
     paired: Boolean,
+    /** False while it is still being asked whether there is a partner: no "Invite your partner" card until it is known. */
+    pairingKnown: Boolean = true,
     partnerName: String,
     onInvite: () -> Unit,
     next: com.godbless.lockin.data.Plan?,
@@ -1458,7 +1465,7 @@ private fun HomeTab(
                 }
             },
             right = {
-                if (!paired) {
+                if (!paired && pairingKnown) {
                     InviteCard(onInvite, Modifier.riseSpring(entrance, 2))
                     Spacer(Modifier.height(14.dp))
                 }

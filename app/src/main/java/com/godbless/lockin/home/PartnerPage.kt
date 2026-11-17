@@ -264,7 +264,7 @@ private fun RopeCard(youName: String, status: String, active: Boolean, onMessage
                 drawCircle(LockInColors.Lime, radius = 5.dp.toPx(), center = Offset(mid, knotY))
             }
             Column(Modifier.align(Alignment.TopStart), horizontalAlignment = Alignment.CenterHorizontally) {
-                Avatar(first, boxSize = 64.dp, ring = LockInColors.Slate)
+                Avatar(first, boxSize = 64.dp, ring = LockInColors.Slate, me = true)
                 Text("You", style = LockInText.Small.copy(color = LockInColors.Silver), modifier = Modifier.padding(top = 6.dp).width(64.dp), textAlign = TextAlign.Center)
             }
             Column(Modifier.align(Alignment.TopEnd), horizontalAlignment = Alignment.CenterHorizontally) {

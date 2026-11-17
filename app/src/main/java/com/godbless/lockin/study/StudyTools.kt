@@ -120,11 +120,17 @@ internal fun StudyKitRow(store: StudyStore, onOpen: (Tool) -> Unit, modifier: Mo
             val source = remember { MutableInteractionSource() }
             val pressed by source.collectIsPressedAsState()
             val squeeze by animateFloatAsState(if (pressed) 0.95f else 1f, spring(dampingRatio = 0.55f, stiffness = 500f), label = "kit")
-            // The chips pop up one after another, and the icon tips when you press.
-            val pop = remember { androidx.compose.animation.core.Animatable(0f) }
+            // The chips pop up one after another the first time Home opens in this run of the app, and the icon tips
+            // when you press. Coming back from another tab they are simply there. (They used to wait about half a second
+            // small and low, then bounce in, on every visit, which looked like a glitch.)
+            val popKey = "study-kit-$index"
+            val popSeen = remember { com.godbless.lockin.home.HomeIntro.played.contains(popKey) }
+            val pop = remember { androidx.compose.animation.core.Animatable(if (popSeen) 1f else 0f) }
             LaunchedEffect(Unit) {
-                kotlinx.coroutines.delay(420L + index * 80L)
-                pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 260f))
+                if (popSeen) return@LaunchedEffect
+                com.godbless.lockin.home.HomeIntro.played.add(popKey)
+                kotlinx.coroutines.delay(200L + index * 70L)
+                pop.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = 320f))
             }
             val tilt by animateFloatAsState(if (pressed) -12f else 0f, spring(dampingRatio = 0.4f, stiffness = 400f), label = "tilt")
             val shape = RoundedCornerShape(18.dp)
@@ -134,9 +140,11 @@ internal fun StudyKitRow(store: StudyStore, onOpen: (Tool) -> Unit, modifier: Mo
                     .height(48.dp)
                     .graphicsLayer {
                         val p = pop.value
-                        scaleX = squeeze * (0.8f + 0.2f * p)
-                        scaleY = squeeze * (0.8f + 0.2f * p)
-                        translationY = (1f - p) * 22.dp.toPx()
+                        // Hidden until it starts, so it never sits there small and low; a short, gentle rise from just below.
+                        alpha = (p * 3f).coerceIn(0f, 1f)
+                        scaleX = squeeze * (0.92f + 0.08f * p)
+                        scaleY = squeeze * (0.92f + 0.08f * p)
+                        translationY = (1f - p) * 12.dp.toPx()
                     }
                     .clip(shape)
                     .background(LockInColors.Slate)

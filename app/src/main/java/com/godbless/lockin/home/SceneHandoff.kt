@@ -56,7 +56,15 @@ internal object SceneHandoff {
     /** True from the first frame of the move until Home takes over. */
     var flying by mutableStateOf(false)
 
+    /**
+     * Home has who your partner is and today's numbers, so its first picture is the right one. The welcome page
+     * waits for this (a few seconds at most) before it moves, so Home never shows "Invite your partner" for a
+     * moment and then rearranges itself.
+     */
+    var dataReady by mutableStateOf(false)
+
     fun beginToHome() {
+        dataReady = false
         box = null
         sceneHidden = true
         chromeShown = false

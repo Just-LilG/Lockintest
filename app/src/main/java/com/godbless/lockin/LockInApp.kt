@@ -71,10 +71,19 @@ fun LockInApp(repo: AuthRepository) {
         if (homeUp || moving) return
         moving = true
         SceneHandoff.beginToHome()
+        // Home is built under the welcome page; its intros wait until the move starts so everything lands together.
+        com.godbless.lockin.ui.EntranceGate.held = true
         homeUp = true
         scope.launch {
-            // Wait for Home's first layout, so the page knows where its mountain card is.
-            withTimeoutOrNull(700) { snapshotFlow { SceneHandoff.box }.first { it != null } }
+            try {
+                // Wait for Home's first layout, so the page knows where its mountain card is.
+                withTimeoutOrNull(700) { snapshotFlow { SceneHandoff.box }.first { it != null } }
+                // And for who your partner is and today's numbers, so Home's first picture is the right one.
+                // The page says "getting your partner's news" while this runs. A slow connection only waits so long.
+                withTimeoutOrNull(2500) { snapshotFlow { SceneHandoff.dataReady }.first { it } }
+            } finally {
+                com.godbless.lockin.ui.EntranceGate.held = false
+            }
             climb.snapTo(0f)
             climb.animateTo(1f, tween(CLIMB_MS, easing = Glide))
             SceneHandoff.land()
