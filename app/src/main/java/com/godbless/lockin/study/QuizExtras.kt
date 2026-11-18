@@ -320,7 +320,7 @@ internal fun TypeCard(card: Card, store: StudyStore, remaining: Int, onRate: (Ra
                 CardImage(store, card.image, Modifier.fillMaxWidth().heightIn(max = 220.dp))
                 Spacer(Modifier.height(12.dp))
             }
-            Text(card.question, style = LockInText.Title.copy(fontSize = 23.sp, lineHeight = 30.sp))
+            MathText(card.question, style = LockInText.Title.copy(fontSize = 23.sp, lineHeight = 30.sp))
         }
         Spacer(Modifier.height(16.dp))
         val v = verdict
@@ -347,7 +347,7 @@ internal fun TypeCard(card: Card, store: StudyStore, remaining: Int, onRate: (Ra
                 Text(title, style = LockInText.Label.copy(color = color, fontSize = 16.sp))
                 Spacer(Modifier.height(6.dp))
                 Text("The answer", style = LockInText.Small.copy(color = LockInColors.Mist))
-                Text(card.answer, style = LockInText.Sub.copy(color = LockInColors.Lime, fontSize = 17.sp))
+                MathText(card.answer, style = LockInText.Sub.copy(color = LockInColors.Lime, fontSize = 17.sp))
                 if (!gaveUp && v != Match.Right) {
                     Spacer(Modifier.height(6.dp))
                     Text("You wrote: $typed", style = LockInText.Small.copy(color = LockInColors.Body))
@@ -593,18 +593,18 @@ internal fun SimplifySheet(store: StudyStore, cardId: String, onEdit: () -> Unit
         else -> {
             Text("Now", style = LockInText.Small.copy(color = LockInColors.Mist))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(LockInColors.Ink).padding(12.dp)) {
-                Text(card.question, style = LockInText.Small.copy(color = LockInColors.Body))
-                Text(card.answer, style = LockInText.Small.copy(color = LockInColors.Mist))
+                MathText(card.question, style = LockInText.Small.copy(color = LockInColors.Body))
+                MathText(card.answer, style = LockInText.Small.copy(color = LockInColors.Mist))
             }
             Spacer(Modifier.height(10.dp))
             Text("Suggested", style = LockInText.Small.copy(color = LockInColors.Lime))
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(LockInColors.Graphite).border(1.dp, LockInColors.Lime, RoundedCornerShape(14.dp)).padding(14.dp)) {
-                Text(r.question, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp))
+                MathText(r.question, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp))
                 Spacer(Modifier.height(4.dp))
-                Text(r.answer, style = LockInText.Sub.copy(color = LockInColors.Lime))
+                MathText(r.answer, style = LockInText.Sub.copy(color = LockInColors.Lime))
                 if (r.hint.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("💡 ${r.hint}", style = LockInText.Small.copy(color = LockInColors.Body))
+                    MathText("💡 ${r.hint}", style = LockInText.Small.copy(color = LockInColors.Body))
                 }
             }
             Spacer(Modifier.height(16.dp))

@@ -128,6 +128,9 @@ internal object Rig {
     const val CROUCH = 0.80f
     const val LEAN_DEG = 57f
 
+    /** How high a full jump (see `pose`'s [jump]) lifts the hips, in scene units. */
+    const val JUMP_H = 28f
+
     fun distance(c: ClimberSpec, t: Float): Float {
         val x = (t - c.t0) / c.dur
         if (x <= 0f) return 0f
@@ -164,7 +167,7 @@ internal object Rig {
      * a slow weight shift, a glance up at the summit and re-planting the axe. [wave] (0 to 1) raises the
      * near arm and waves it, as when a partner's nudge lands.
      */
-    fun pose(c: ClimberSpec, t: Float, idleT: Float, wave: Float = 0f, life: Life = Life.Climb): Pose {
+    fun pose(c: ClimberSpec, t: Float, idleT: Float, wave: Float = 0f, life: Life = Life.Climb, jump: Float = 0f): Pose {
         // The two climbers keep their own rhythm, so they never move in step.
         val ph = idleT + if (c.dir > 0f) 0f else 2.7f
         val d = distance(c, t)
@@ -270,7 +273,6 @@ internal object Rig {
         var footB = aB
         var pitchA = footPitch(0f)
         var pitchB = footPitch(0.5f)
-        var bendArmA = 0f // 0 = elbow bends one way, 1 = the other; eased, never switched
         val bendLeg = -1f
         var pack = 0.10f * cos(twoPi * 2f * phiLag - 0.9f)
         var puff = life.tired
@@ -296,7 +298,7 @@ internal object Rig {
                 val roll = sin(ph * 0.42f)
                 val fA = Pt(d + 14f, g(d + 14f) - ANKLE_H)
                 // The back foot re-plants every so often, as people do when they've been standing a while.
-                val stamp = pulse(ph + 1.9f, 7.5f, 0.9f)
+                val stamp = pulse(ph + 1.9f, 7.5f, 0.9f) * (1f - life.cheer)
                 val bx = d - 16f + 3f * stamp
                 val fB = Pt(bx, g(bx) - ANKLE_H - 6f * stamp)
                 val tall = 0.94f * (THIGH + SHIN)
@@ -348,8 +350,6 @@ internal object Rig {
                 gripB = mix(gripB, sGripB, wStand)
                 pitchA = mix(pitchA, 0.05f, wStand)
                 pitchB = mix(pitchB, 0.05f - 0.55f * stamp, wStand)
-                // The elbow of the axe arm swings round to the other side as they stand: eased with the weight.
-                bendArmA = max(bendArmA, wStand)
                 pack = mix(pack, 0.03f * sin(ph * breathRate) - life.cheer * 0.14f * max(0f, sin(hopPh - 0.9f)), wStand)
                 puff = max(puff, 0.35f * (1f - life.walk))
             }
@@ -365,6 +365,28 @@ internal object Rig {
                 gripA = mix(gripA, 0.2f, k)
                 pack -= 0.25f * k
                 twistK *= 1f - k
+            }
+        }
+
+        // A jump of surprise (as when a nudge lands): [jump] below 0 is the crouch before take-off and the landing
+        // (the hips drop, the body folds forward), above 0 is in the air (the hips rise, the legs tuck, the head
+        // tips up). The hands go with the body or the arms would stretch to the ground.
+        if (jump != 0f) {
+            val up = if (jump > 0f) jump * JUMP_H else jump * 9f
+            hip = Pt(hip.x, hip.y - up)
+            handA = Pt(handA.x, handA.y - up * 0.85f)
+            handB = Pt(handB.x, handB.y - up * 0.85f)
+            if (jump > 0f) {
+                val tuck = jump * (JUMP_H * 0.80f + 8f)
+                footA = Pt(footA.x, footA.y - tuck)
+                footB = Pt(footB.x, footB.y - tuck * 0.9f)
+                pitchA += 0.30f * jump
+                pitchB += 0.40f * jump
+                tilt -= 0.20f * jump
+                pack -= 0.12f * jump
+            } else {
+                lean += 0.12f * -jump
+                pack += 0.06f * -jump
             }
         }
 
@@ -384,9 +406,9 @@ internal object Rig {
         // Waving: the near arm goes up over the head and swings side to side.
         val waveTarget = Pt(sh.x + 38f + 14f * sin(idleT * 13f), sh.y - 44f)
         val targetA = if (wave > 0f) swingPt(sh, handA, waveTarget, wave) else handA
-        // Which way the elbow points eases between the two (an elbow never flips in a single frame).
-        val bendA = max(bendArmA, smooth(wave * 1.6f))
-        val armA = twoBoneBlend(shA, targetA, UARM, FARM, bendA)
+        // Both elbows always bend the same way, like a real arm. (The near elbow used to swing round to the other
+        // side when standing, cheering or waving, which turned the whole arm through about 200 degrees.)
+        val armA = twoBone(shA, targetA, UARM, FARM, +1f, soft = true)
         val armB = twoBone(shB, handB, UARM, FARM, +1f, soft = true)
 
         return Pose(

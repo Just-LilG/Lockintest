@@ -509,7 +509,7 @@ private fun FlipCard(card: Card, store: StudyStore, remaining: Int, onRate: (Rat
                             CardImage(store, card.image, Modifier.fillMaxWidth().heightIn(max = 240.dp))
                             Spacer(Modifier.height(14.dp))
                         }
-                        Text(card.question, style = LockInText.Title.copy(textAlign = TextAlign.Center, fontSize = 24.sp, lineHeight = 31.sp))
+                        MathText(card.question, style = LockInText.Title.copy(textAlign = TextAlign.Center, fontSize = 24.sp, lineHeight = 31.sp))
                         Spacer(Modifier.height(18.dp))
                         Text("Tap to see the answer", style = LockInText.Small.copy(color = LockInColors.Mist))
                     }
@@ -518,7 +518,7 @@ private fun FlipCard(card: Card, store: StudyStore, remaining: Int, onRate: (Rat
                     Column(Modifier.graphicsLayer { rotationY = 180f }, horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("ANSWER", style = LockInText.Small.copy(color = LockInColors.Lime, fontSize = 11.sp, letterSpacing = 1.5.sp))
                         Spacer(Modifier.height(12.dp))
-                        Text(card.answer, style = LockInText.Title.copy(color = LockInColors.Lime, textAlign = TextAlign.Center, fontSize = 24.sp, lineHeight = 31.sp))
+                        MathText(card.answer, style = LockInText.Title.copy(color = LockInColors.Lime, textAlign = TextAlign.Center, fontSize = 24.sp, lineHeight = 31.sp))
                     }
                 }
                 if (card.page > 0) {
@@ -593,7 +593,7 @@ private fun ChoiceCard(card: Card, store: StudyStore, deck: List<Card>, remainin
             CardImage(store, card.image, Modifier.fillMaxWidth().heightIn(max = 220.dp))
             Spacer(Modifier.height(14.dp))
         }
-        Text(card.question, style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 31.sp), modifier = Modifier.padding(horizontal = 4.dp))
+        MathText(card.question, style = LockInText.Title.copy(fontSize = 24.sp, lineHeight = 31.sp), modifier = Modifier.padding(horizontal = 4.dp))
         Spacer(Modifier.height(20.dp))
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             options.forEach { o ->
@@ -633,7 +633,7 @@ private fun ChoiceCard(card: Card, store: StudyStore, deck: List<Card>, remainin
         Spacer(Modifier.height(10.dp))
         if (picked != null) {
             if (picked != card.answer) {
-                Text("The answer is: ${card.answer}", style = LockInText.Small.copy(color = LockInColors.Lime), modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
+                MathText("The answer is: ${card.answer}", style = LockInText.Small.copy(color = LockInColors.Lime), modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp))
                 Spacer(Modifier.height(8.dp))
             }
             LockInButton(if (remaining == 0) "Finish" else "Next", { onDone(picked == card.answer) })
@@ -701,9 +701,9 @@ private fun QuizResult(
                     Column(
                         Modifier.fillMaxWidth().clip(shape).background(LockInColors.Slate).border(1.dp, LockInColors.Graphite, shape).padding(14.dp),
                     ) {
-                        Text(c.question, style = LockInText.Sub.copy(color = LockInColors.Snow))
+                        MathText(c.question, style = LockInText.Sub.copy(color = LockInColors.Snow))
                         Spacer(Modifier.height(4.dp))
-                        Text(c.answer, style = LockInText.Sub.copy(color = LockInColors.Lime))
+                        MathText(c.answer, style = LockInText.Sub.copy(color = LockInColors.Lime))
                         if (c.book.isNotEmpty() && c.page > 0) {
                             Text(
                                 "Open page ${c.page}",

@@ -532,11 +532,21 @@ private fun SelectionCard(picture: ImageBitmap, text: String?) {
             Spacer(Modifier.height(10.dp))
             Row {
                 Box(Modifier.width(3.dp).height(20.dp).clip(CircleShape).background(LockInColors.Lime))
-                Text(
-                    "“$text”",
-                    style = LockInText.Sub.copy(color = LockInColors.Snow, fontStyle = FontStyle.Italic, lineHeight = 21.sp),
-                    modifier = Modifier.padding(start = 10.dp),
-                )
+                if (text.contains('$') || RichSplit.looksMath(text)) {
+                    // maths read off the page: drawn as maths, not as a quoted string
+                    MathText(
+                        text,
+                        style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 24.sp),
+                        modifier = Modifier.padding(start = 10.dp),
+                        equation = true,
+                    )
+                } else {
+                    Text(
+                        "“$text”",
+                        style = LockInText.Sub.copy(color = LockInColors.Snow, fontStyle = FontStyle.Italic, lineHeight = 21.sp),
+                        modifier = Modifier.padding(start = 10.dp),
+                    )
+                }
             }
         }
     }
@@ -547,18 +557,18 @@ private fun SelectionCard(picture: ImageBitmap, text: String?) {
 internal fun PassageResult(p: AiPassage) {
     if (p.meaning.isNotBlank()) {
         SectionLabel("What it means")
-        Text(p.meaning, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 24.sp))
+        MathText(p.meaning, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 24.sp))
     }
     if (p.context.isNotBlank()) {
         Spacer(Modifier.height(16.dp))
         SectionLabel("Here in the book")
-        Text(p.context, style = LockInText.Sub.copy(color = LockInColors.Body, lineHeight = 22.sp))
+        MathText(p.context, style = LockInText.Sub.copy(color = LockInColors.Body, lineHeight = 22.sp))
     }
     if (p.example.isNotBlank()) {
         Spacer(Modifier.height(16.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(LockInColors.Graphite).padding(14.dp)) {
             SectionLabel("For example")
-            Text(p.example, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 22.sp))
+            MathText(p.example, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 22.sp))
         }
     }
     if (p.terms.isNotEmpty()) {
@@ -571,7 +581,7 @@ internal fun PassageResult(p: AiPassage) {
                     style = LockInText.Label.copy(color = LockInColors.Lime, fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
                     modifier = Modifier.width(110.dp),
                 )
-                Text(meaning, style = LockInText.Sub.copy(color = LockInColors.Body, fontSize = 14.sp, lineHeight = 20.sp), modifier = Modifier.weight(1f))
+                MathText(meaning, style = LockInText.Sub.copy(color = LockInColors.Body, fontSize = 14.sp, lineHeight = 20.sp), modifier = Modifier.weight(1f))
             }
         }
     }
@@ -595,7 +605,7 @@ internal fun PassageTurnView(ask: String, answer: String?) {
     if (answer == null) {
         Dots()
     } else {
-        Text(answer, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 23.sp))
+        MathText(answer, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 23.sp))
     }
 }
 

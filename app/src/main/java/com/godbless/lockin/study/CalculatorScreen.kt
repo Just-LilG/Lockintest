@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -58,7 +59,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -335,7 +339,7 @@ internal fun CalculatorScreen(onBack: () -> Unit) {
         )
         HistorySheet(
             sheet == CalcSheet.History,
-            model.history.toList(),
+            model.history.map { prettySum(it.first) to it.second },
             { i -> model.recallHistory(i); sheet = CalcSheet.None; bump() },
             { i -> model.insertResult(i); sheet = CalcSheet.None; bump() },
             { model.clearHistory(); bump() },
@@ -444,9 +448,129 @@ private fun CalcLcd(
     }
 }
 
-/** The sum being typed: tap to put the cursor there, hold to paste, drag to scroll a long sum. */
+/** The sum being typed. A sum with stacked fractions (the a/b key) is drawn by [FracInput], any other by [PlainInput]. */
 @Composable
 private fun LcdInput(text: String, cursor: Int, showCaret: Boolean, ink: Color, onCursor: (Int) -> Unit, onPaste: () -> Unit) {
+    val nodes = remember(text) { if ('{' in text) parseSum(text) else null }
+    if (nodes != null) FracInput(nodes, text, cursor, showCaret, ink, onCursor, onPaste)
+    else PlainInput(text, cursor, showCaret, ink, onCursor, onPaste)
+}
+
+/** Everything the pieces of a fraction-aware input line need to share. */
+private class InputCtx(
+    val ink: Color,
+    val cursor: Int,
+    val showCaret: Boolean,
+    val caretOn: Boolean,
+    val ownerStart: Int,
+    val layouts: HashMap<Int, TextLayoutResult>,
+    val coords: HashMap<Int, LayoutCoordinates>,
+    val onLayout: () -> Unit,
+    val onCursor: (Int) -> Unit,
+    val onPaste: () -> Unit,
+)
+
+/**
+ * The sum with real stacked fractions: a bar with the top over the bottom (nested ones too), an empty part shown as
+ * a small box, and the caret inside whichever part you are editing. Each piece of text is its own field that knows
+ * where it starts in the sum, so taps and the caret still line up with the real text.
+ */
+@Composable
+private fun FracInput(nodes: List<SumNode>, text: String, cursor: Int, showCaret: Boolean, ink: Color, onCursor: (Int) -> Unit, onPaste: () -> Unit) {
+    val scroll = rememberScrollState()
+    var viewport by remember { mutableIntStateOf(0) }
+    var caretOn by remember { mutableStateOf(true) }
+    var layoutTick by remember { mutableIntStateOf(0) }
+    var rootCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val layouts = remember { HashMap<Int, TextLayoutResult>() }
+    val coords = remember { HashMap<Int, LayoutCoordinates>() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(530)
+            caretOn = !caretOn
+        }
+    }
+    val owner = caretPiece(nodes, cursor.coerceIn(0, text.length))
+    // Keep the caret in view when the sum is wider than the screen.
+    LaunchedEffect(cursor, text, layoutTick, viewport) {
+        val o = owner ?: return@LaunchedEffect
+        val lay = layouts[o.start] ?: return@LaunchedEffect
+        val c = coords[o.start] ?: return@LaunchedEffect
+        val root = rootCoords ?: return@LaunchedEffect
+        if (!c.isAttached || !root.isAttached) return@LaunchedEffect
+        val r = lay.getCursorRect((cursor - o.start).coerceIn(0, o.text.length))
+        val x = c.positionInRoot().x - root.positionInRoot().x + scroll.value + r.left
+        val pad = 24
+        if (x > scroll.value + viewport - pad) scroll.scrollTo((x - viewport + pad).toInt())
+        else if (x < scroll.value + pad) scroll.scrollTo((x - pad).toInt().coerceAtLeast(0))
+    }
+    val ctx = InputCtx(ink, cursor, showCaret, caretOn, owner?.start ?: -1, layouts, coords, { layoutTick++ }, onCursor, onPaste)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .onSizeChanged { viewport = it.width }
+            .onGloballyPositioned { rootCoords = it }
+            .horizontalScroll(scroll),
+    ) {
+        SumRow(nodes, 0, ctx)
+    }
+}
+
+@Composable
+private fun SumRow(nodes: List<SumNode>, depth: Int, ctx: InputCtx) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        nodes.forEach { n ->
+            when (n) {
+                is SumText -> SumLeaf(n, depth, ctx)
+                is SumFrac -> Column(Modifier.padding(horizontal = 3.dp).width(IntrinsicSize.Max), horizontalAlignment = Alignment.CenterHorizontally) {
+                    SumRow(n.top, depth + 1, ctx)
+                    Box(Modifier.fillMaxWidth().height(2.dp).background(ctx.ink))
+                    SumRow(n.bottom, depth + 1, ctx)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SumLeaf(leaf: SumText, depth: Int, ctx: InputCtx) {
+    val size = when (depth) { 0 -> 25.sp; 1 -> 21.sp; else -> 17.sp }
+    val isOwner = ctx.ownerStart == leaf.start
+    // An empty part inside a fraction is drawn as a little box, so you can see where to type.
+    val slot = leaf.text.isEmpty() && depth > 0
+    val slotShape = RoundedCornerShape(4.dp)
+    Text(
+        remember(leaf.text) { styledSum(leaf.text.ifEmpty { " " }) },
+        style = LockInText.Title.copy(color = ctx.ink, fontSize = size, lineHeight = size * 1.28f),
+        maxLines = 1,
+        softWrap = false,
+        onTextLayout = {
+            // Only tell the line to re-check the caret when this piece's size really changed (no feedback loop).
+            val before = ctx.layouts.put(leaf.start, it)
+            if (before == null || before.size != it.size) ctx.onLayout()
+        },
+        modifier = Modifier
+            .then(if (slot) Modifier.defaultMinSize(minWidth = 20.dp).border(1.dp, ctx.ink.copy(alpha = 0.4f), slotShape).padding(horizontal = 2.dp) else Modifier)
+            .onGloballyPositioned { ctx.coords[leaf.start] = it }
+            .pointerInput(leaf.start, leaf.text) {
+                detectTapGestures(
+                    onTap = { p -> ctx.layouts[leaf.start]?.let { ctx.onCursor(leaf.start + it.getOffsetForPosition(p).coerceAtMost(leaf.text.length)) } },
+                    onLongPress = { ctx.onPaste() },
+                )
+            }
+            .drawBehind {
+                val l = ctx.layouts[leaf.start]
+                if (isOwner && ctx.showCaret && ctx.caretOn && l != null) {
+                    val r = l.getCursorRect((ctx.cursor - leaf.start).coerceIn(0, leaf.text.length))
+                    drawRect(ctx.ink, Offset(r.left, r.top), Size(2.dp.toPx(), r.height))
+                }
+            },
+    )
+}
+
+/** The sum being typed: tap to put the cursor there, hold to paste, drag to scroll a long sum. */
+@Composable
+private fun PlainInput(text: String, cursor: Int, showCaret: Boolean, ink: Color, onCursor: (Int) -> Unit, onPaste: () -> Unit) {
     val scroll = rememberScrollState()
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     var viewport by remember { mutableIntStateOf(0) }

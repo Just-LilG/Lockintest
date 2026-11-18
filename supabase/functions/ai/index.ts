@@ -22,6 +22,10 @@
 //   2. Google Gemini, when Groq fails, returns too little, or is merely slow: if Groq hasn't answered after
 //      HEDGE_MS, Gemini is started as well and whichever gives a usable answer first wins (the other is cancelled).
 //
+// Maths: every task is told to write formulas as LaTeX between dollar signs ($...$ inline, $$...$$ on its own line), which
+// the app draws as real maths (study/MathText.kt). LaTeX is full of backslashes, so replies go through mathjson.ts: a
+// single \frac inside a JSON string would otherwise turn into a form feed or make the whole reply unparseable.
+//
 // Groq keys: the GROQ_API_KEY secret (comma-separated) plus the "groq", "groq2", "groq3", "groq4" rows of
 // private.ai_keys (read through public.ai_key(), which only the service role may call). GROQ_MODEL optionally
 // overrides the vision model.
@@ -33,6 +37,7 @@
 //   AI_HEDGE_MS      optional, how long Groq gets alone before Gemini joins in, defaults to 9000.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { cleanMathText, repairJsonBackslashes } from "./mathjson.ts";
 
 const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
   auth: { persistSession: false },
@@ -53,10 +58,22 @@ const HEDGE_MS = Math.max(2_000, Number(Deno.env.get("AI_HEDGE_MS") || 9_000));
 
 // ---- What to ask -------------------------------------------------------------------------------
 
+// How every answer writes maths. The app draws $...$ and $$...$$ as typeset maths; plain "x^2" or "a/b" would show as
+// typed. Doubled backslashes are for the JSON the model replies in (mathjson.ts repairs the ones it forgets).
+const MATH = String.raw`MATHS FORMAT (the app draws it as real, typeset maths):
+- Write every formula, equation, expression and maths symbol in LaTeX between dollar signs: $...$ inside a sentence, and $$...$$ alone on its own line for a main equation or a worked step.
+- Never write maths as plain text. Not x^2, a/b, sqrt(x), *, <=, pi. Write $x^2$, $\frac{a}{b}$, $\sqrt{x}$, $\cdot$, $\le$, $\pi$.
+- Put even one variable or number that is part of the maths in dollars: "the coefficient of $x^2$", "when $a = 3$". Ordinary words and units go outside the dollars, or inside \text{...}.
+- Use plain LaTeX only: \frac{}{}, ^, _, \sqrt{}, \sqrt[n]{}, \left( ... \right), \sum, \int, \lim, \pm, \times, \cdot, \div, \le, \ge, \ne, \approx, \to, \infty, Greek letters (\alpha, \theta, \pi, \Delta ...), \vec{}, \bar{}, \hat{}, \overline{}, \begin{pmatrix}...\end{pmatrix}, \begin{cases}...\end{cases}, \begin{aligned}...\end{aligned}, \text{...}.
+- A real dollar amount is written \$5.
+- In a worked solution, give each step on its own $$...$$ line with one short sentence of words between steps.
+- The reply is JSON, so every backslash inside a string must be doubled: write \\frac so the JSON holds \frac.`;
+
 const RULES = `You are LockIn's study helper for a student.
 Use ONLY what is on the textbook pages shown. Do not add outside facts. If a page is blank, a cover, a contents
 page or unreadable, ignore it. Write in clear, friendly, simple English. Each page image is introduced by a line
-"Page N of <book>"; when you say where something is, use that N.`;
+"Page N of <book>"; when you say where something is, use that N.
+${MATH}`;
 
 const ORDINAL = ["first", "second", "third", "fourth"];
 
@@ -64,11 +81,12 @@ function passagePrompt(x: Passage): string {
   const base = `You are LockIn's study helper. A student reading the textbook "${x.book}" selected part of page ${x.page} and wants help with it.
 The FIRST image is exactly what they selected: a word, a phrase, a sentence or two, an equation, a table cell or part of a figure.
 The SECOND image is the whole page, so you can see where the selection sits and what the page is teaching.
-Read the selection exactly as printed and put it in "text" (for an equation, write it in plain text like "v = u + at").
+Read the selection exactly as printed and put it in "text" (for an equation or any maths, write it as LaTeX between dollar signs, like "$v = u + at$"; plain words stay plain).
 Explain it AS THIS BOOK USES IT: if the word has an everyday meaning and a special meaning in this subject, give the subject meaning.
 You may use general knowledge to make the meaning clear, but stay true to what the page says. Plain, friendly English; short sentences.
 If the selection is an equation, say what each symbol stands for and what the equation tells you.
-If you cannot read the selection, set "text" to "" and "answer" to one sentence asking the student to select it again a little larger.`;
+If you cannot read the selection, set "text" to "" and "answer" to one sentence asking the student to select it again a little larger.
+${MATH}`;
   const prior = x.prior ? `\nAlready said to the student about this selection (don't repeat it): ${x.prior}` : "";
   if (x.mode === "ask") {
     return `${base}${prior}
@@ -97,7 +115,8 @@ Answer: ${card?.a ?? ""}
 Rewrite it so it is easier to learn, without changing what it teaches. If a textbook page is shown, stay true to it.
 "q": a clearer, more specific question (one short sentence).
 "a": the answer, as short as it can be while still right (a few words, or one short sentence).
-"hint": one memory hook (a mnemonic, an image or an everyday comparison) in one short sentence.`;
+"hint": one memory hook (a mnemonic, an image or an everyday comparison) in one short sentence.
+${MATH}`;
   }
   // When the same pages are written up by several helpers at once, each is given its own stretch of them.
   const share = part && part[1] > 1
@@ -135,7 +154,7 @@ function shapeFor(task: string): string {
 
 /** The first JSON object in a reply (tolerates code fences or stray words around it). */
 function parseJson(text: string): any {
-  const t = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
+  const t = repairJsonBackslashes(text.replace(/<think>[\s\S]*?<\/think>/g, "").trim());
   try { return JSON.parse(t); } catch { /* look inside */ }
   const a = t.indexOf("{"), b = t.lastIndexOf("}");
   if (a >= 0 && b > a) return JSON.parse(t.slice(a, b + 1));
@@ -313,7 +332,7 @@ function plan(task: string, count: number, pages: Page[]): Shard[] {
 }
 
 const tokensFor = (task: string, count: number) =>
-  task === "quiz" ? count * 450 + 500 : task === "cards" ? count * 200 + 400 : task === "simplify" ? 900 : task === "passage" ? 1100 : 1800;
+  task === "quiz" ? count * 520 + 600 : task === "cards" ? count * 240 + 500 : task === "simplify" ? 1000 : task === "passage" ? 1500 : 2100;
 
 const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 70);
 
@@ -471,7 +490,7 @@ async function geminiTask(
     try {
       const out = await r.json();
       const text = out?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("") ?? "";
-      return JSON.parse(text);
+      return JSON.parse(repairJsonBackslashes(text));
     } catch {
       lastStatus = 0;
       continue;
@@ -486,7 +505,8 @@ async function geminiTask(
 function clean(task: string, raw: any, pages: Page[], count: number) {
   const known = new Set(pages.map((p) => p.page));
   const pageOf = (n: unknown) => (known.has(Number(n)) ? Number(n) : pages[0]?.page ?? 1);
-  const s = (v: unknown, max = 400) => String(v ?? "").trim().slice(0, max);
+  // Text the student reads can hold LaTeX, so it is cleaned for that (mathjson.ts) and given a little more room.
+  const s = (v: unknown, max = 400) => cleanMathText(v, Math.round(max * 1.3));
   if (task === "simplify") return { q: s(raw?.q, 300), a: s(raw?.a, 300), hint: s(raw?.hint, 300) };
   if (task === "passage") {
     return {

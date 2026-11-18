@@ -15,7 +15,7 @@ internal enum class KeyStyle { Fn, Num, Op, Del, Eq, Shift, Alpha, Mode }
 
 internal enum class KeyAct {
     Shift, Alpha, Second, Hyp, Ac, ClrAll, Del, Eq, MemAdd, MemSub, Sd, Eng, Si, Calc, Solve, Sto, Rcl, ClrVars,
-    Dms, Fact, Mode, Const, Conv, Func, Help, Matrix, Vector, Stat, Cmplx, Distr, History, Copy, Paste, Compare,
+    Dms, Fact, Mode, Const, Conv, Func, Help, Matrix, Vector, Stat, Cmplx, Distr, History, Copy, Paste, Compare, Frac,
 }
 
 /** Things the screen has to do for a key (open a menu, switch page, use the clipboard). */
@@ -73,7 +73,7 @@ internal object CalcKeys {
 
     val SciRows = listOf(
         listOf(
-            CalcKeyDef("a/b", "/", alpha = L("÷R", "divr("), spoken = "fraction"),
+            CalcKeyDef("a/b", "/", act = KeyAct.Frac, alpha = L("÷R", "divr("), spoken = "fraction"),
             CalcKeyDef("√x", "√(", shift = L("∛x", "∛("), alpha = L("mod", " mod "), second = L("Int", "int("), spoken = "square root"),
             CalcKeyDef("x²", "²", shift = L("x³", "³"), alpha = L("z", "z"), second = L("Frac", "frac("), spoken = "squared"),
             CalcKeyDef("xʸ", "^", shift = L("ˣ√y", "ˣ√"), second = L("Sign", "sign("), spoken = "power"),
@@ -159,6 +159,96 @@ internal fun engineeringText(v: Double, fmt: NumFormat): String {
     if (exp == 0) return Calc.format(mantissa, fmt)
     val sup = exp.toString().map { ch -> if (ch == '-') '⁻' else "⁰¹²³⁴⁵⁶⁷⁸⁹"[ch - '0'] }.joinToString("")
     return "${Calc.format(mantissa, fmt)}×10$sup"
+}
+
+/** Where one stacked fraction sits in the sum text: its `{`, its `|` bar and its `}`. */
+internal class FracSpan(val open: Int, val bar: Int, val close: Int)
+
+internal fun fractionSpans(text: String): List<FracSpan> {
+    val out = ArrayList<FracSpan>()
+    val stack = ArrayList<IntArray>() // [open, bar]
+    for ((i, ch) in text.withIndex()) {
+        when (ch) {
+            '{' -> stack.add(intArrayOf(i, -1))
+            '|' -> if (stack.isNotEmpty()) stack[stack.lastIndex][1] = i
+            '}' -> if (stack.isNotEmpty()) {
+                val t = stack.removeAt(stack.lastIndex)
+                out.add(FracSpan(t[0], t[1], i))
+            }
+        }
+    }
+    return out
+}
+
+/** A sum split for drawing: plain text pieces and stacked fractions (which hold more pieces). */
+internal sealed class SumNode
+
+internal class SumText(val start: Int, val text: String) : SumNode()
+
+internal class SumFrac(val open: Int, val top: List<SumNode>, val bottom: List<SumNode>, val close: Int) : SumNode()
+
+/** Splits a sum into text and fractions, or null if the { | } marks don't pair up. Every gap gets a (maybe empty) text piece. */
+internal fun parseSum(text: String): List<SumNode>? {
+    var i = 0
+    fun seq(stop: Char?): List<SumNode>? {
+        val out = ArrayList<SumNode>()
+        var segStart = i
+        while (true) {
+            if (i >= text.length) {
+                if (stop != null) return null
+                out += SumText(segStart, text.substring(segStart, i))
+                return out
+            }
+            val ch = text[i]
+            if (ch == '{') {
+                out += SumText(segStart, text.substring(segStart, i))
+                val open = i
+                i++
+                val top = seq('|') ?: return null
+                i++ // the bar
+                val bottom = seq('}') ?: return null
+                i++ // the closing mark
+                out += SumFrac(open, top, bottom, i - 1)
+                segStart = i
+            } else if (stop != null && ch == stop) {
+                out += SumText(segStart, text.substring(segStart, i))
+                return out
+            } else if (ch == '|' || ch == '}') {
+                return null
+            } else {
+                i++
+            }
+        }
+    }
+    return seq(null)
+}
+
+/** The text piece the cursor is in (each cursor position is in exactly one piece). */
+internal fun caretPiece(nodes: List<SumNode>, cursor: Int): SumText? {
+    for (n in nodes) {
+        when (n) {
+            is SumText -> if (cursor >= n.start && cursor <= n.start + n.text.length) return n
+            is SumFrac -> (caretPiece(n.top, cursor) ?: caretPiece(n.bottom, cursor))?.let { return it }
+        }
+    }
+    return null
+}
+
+private val simpleFraction = Regex("\\{([^{}|]*)\\|([^{}|]*)\\}")
+
+/** A sum written on one line for lists: {1|2} becomes 1÷2, {1+2|3} becomes (1+2)÷3. */
+internal fun prettySum(s: String): String {
+    var t = s
+    var guard = 0
+    while ('{' in t && guard++ < 20) {
+        val next = simpleFraction.replace(t) { m ->
+            fun wrap(x: String) = if (x.isNotEmpty() && x.all { it.isDigit() || it == '.' }) x else "($x)"
+            wrap(m.groupValues[1]) + "÷" + wrap(m.groupValues[2])
+        }
+        if (next == t) break
+        t = next
+    }
+    return t
 }
 
 internal class CalcModel {
@@ -285,14 +375,130 @@ internal class CalcModel {
         val c = cursor.coerceIn(0, expr.length)
         if (c == 0) return
         val before = expr.substring(0, c)
+        if (before.last() == '{' || before.last() == '|' || before.last() == '}') { deleteAtFraction(c); return }
         val n = tokenBefore(before)
         expr = expr.substring(0, c - n) + expr.substring(c)
         cursor = c - n
     }
 
+    /**
+     * DEL next to a fraction's own marks. An empty fraction goes away; DEL at the start of an empty bottom takes the
+     * fraction apart and keeps the top; otherwise the cursor just steps out of (or into) the fraction.
+     */
+    private fun deleteAtFraction(c: Int) {
+        val spans = fractionSpans(expr)
+        val span = when (expr[c - 1]) {
+            '{' -> spans.firstOrNull { it.open == c - 1 }
+            '|' -> spans.firstOrNull { it.bar == c - 1 }
+            else -> spans.firstOrNull { it.close == c - 1 }
+        }
+        if (span == null) { // a stray mark: just remove it
+            expr = expr.removeRange(c - 1, c)
+            cursor = c - 1
+            return
+        }
+        val topEmpty = span.bar == span.open + 1
+        val bottomEmpty = span.close == span.bar + 1
+        when {
+            topEmpty && bottomEmpty -> {
+                expr = expr.substring(0, span.open) + expr.substring(span.close + 1)
+                cursor = span.open
+            }
+            expr[c - 1] == '|' && bottomEmpty -> {
+                expr = expr.substring(0, span.open) + expr.substring(span.open + 1, span.bar) + expr.substring(span.close + 1)
+                cursor = span.bar - 1
+            }
+            else -> cursor = c - 1
+        }
+    }
+
+    // ---- Stacked fractions ---------------------------------------------------------------------
+
+    /** How much of [before] is the number (or bracket, function, fraction…) a new fraction should take as its top. */
+    private fun operandLengthBefore(before: String): Int {
+        var k = before.length
+        // ², ³, ! and % belong to the number before them: 5² over 3 takes the whole 5².
+        while (k > 0) {
+            val ch = before[k - 1]
+            if (ch == '²' || ch == '³' || ch == '!' || ch == '%') k--
+            else if (k >= 2 && before.startsWith("⁻¹", k - 2)) k -= 2
+            else break
+        }
+        val core = coreOperandLength(before.substring(0, k))
+        return if (core == 0) 0 else (before.length - k) + core
+    }
+
+    private fun coreOperandLength(s: String): Int {
+        if (s.isEmpty()) return 0
+        val last = s.last()
+        when {
+            last == ')' -> {
+                var depth = 0
+                var k = s.length
+                while (k > 0) {
+                    k--
+                    if (s[k] == ')') depth++ else if (s[k] == '(') { depth--; if (depth == 0) break }
+                }
+                if (depth != 0) return 0
+                var start = k
+                val fn = tokens.firstOrNull { it.endsWith("(") && s.substring(0, k + 1).endsWith(it) }
+                if (fn != null) start = k + 1 - fn.length
+                else if (k > 0 && (s[k - 1] == '√' || s[k - 1] == '∛')) start = k - 1
+                return s.length - start
+            }
+            last == '}' -> {
+                var depth = 0
+                var k = s.length
+                while (k > 0) {
+                    k--
+                    if (s[k] == '}') depth++ else if (s[k] == '{') { depth--; if (depth == 0) break }
+                }
+                return if (depth == 0) s.length - k else 0
+            }
+            last == '⟩' -> { val k = s.lastIndexOf('⟨'); return if (k >= 0) s.length - k else 1 }
+            last.isDigit() || last == '.' -> {
+                var k = s.length
+                while (k > 0 && (s[k - 1].isDigit() || s[k - 1] == '.')) k--
+                return s.length - k
+            }
+            else -> {
+                val t = listOf("PreAns", "Ans", "Ran#").firstOrNull { s.endsWith(it) }
+                if (t != null) return t.length
+                return if (last.isLetter() || last == 'π' || last == '∞') 1 else 0
+            }
+        }
+    }
+
+    /** The a/b key: a stacked fraction. The number before the cursor becomes the top and the cursor drops to the bottom. */
+    private fun typeFraction() {
+        if (done) {
+            leaveAnswer()
+            expr = "{Ans|}"
+            cursor = 5
+            return
+        }
+        val c = cursor.coerceIn(0, expr.length)
+        val n = operandLengthBefore(expr.substring(0, c))
+        val start = c - n
+        expr = expr.substring(0, start) + "{" + expr.substring(start, c) + "|}" + expr.substring(c)
+        cursor = if (n > 0) c + 2 else start + 1
+    }
+
+    /** ▲ ▼ inside a fraction move between its top and bottom (and never browse history). True if the arrow was used up. */
+    private fun moveInFraction(up: Boolean): Boolean {
+        if (done || prompting) return false
+        val c = cursor.coerceIn(0, expr.length)
+        val span = fractionSpans(expr).filter { it.open < c && c <= it.close && it.bar > it.open }.maxByOrNull { it.open } ?: return false
+        val inBottom = c > span.bar
+        if (up && inBottom) cursor = span.bar
+        else if (!up && !inBottom) cursor = span.bar + 1
+        return true
+    }
+
     /** 0 left, 1 right, 2 up (older sums), 3 down (newer sums). */
     fun move(dir: Int) {
         error = ""
+        if ((dir == 2 || dir == 3) && moveInFraction(dir == 2)) { refresh(); return }
         when (dir) {
             0 -> {
                 if (done) { reopen(null); return }
@@ -437,6 +643,7 @@ internal class CalcModel {
                 // (−) is a sign, not the minus operator: after an answer it starts a new number (−5), it does not carry on from Ans.
                 l.label == "(−)" && l.insert == "−" -> type("−", fresh = true)
                 l.label == "×10ˣ" && l.insert == "E" -> typeExp()
+                l.act == KeyAct.Frac -> typeFraction()
                 else -> type(l.insert)
             }
         }
@@ -800,7 +1007,7 @@ internal class CalcModel {
 
     /** The answer as text for the clipboard (or what is typed, if there is no answer yet). */
     fun copyText(): String {
-        if (!done) return if (preview.isNotEmpty()) preview else expr
+        if (!done) return if (preview.isNotEmpty()) preview else prettySum(expr)
         if (lines.isNotEmpty()) return lines.joinToString("\n") { if (it.first.isEmpty()) it.second else it.first + "=" + it.second }
         return resultText()
     }
@@ -948,6 +1155,7 @@ internal fun describeKey(k: CalcKeyDef): List<Pair<String, String>> {
         KeyAct.History -> "Opens your earlier sums"
         KeyAct.Copy -> "Copies the answer"
         KeyAct.Paste -> "Pastes into the sum"
+        KeyAct.Frac -> "Starts a stacked fraction: the number before the cursor goes on top, then type the bottom. ▲ ▼ switch between top and bottom"
         KeyAct.Compare -> "Opens the comparison signs: = ≠ > < ≥ ≤ (a sum like 2+2=4 answers True or False)"
         KeyAct.MemAdd -> "Adds the number on screen to memory M"
         KeyAct.MemSub -> "Subtracts the number on screen from memory M"

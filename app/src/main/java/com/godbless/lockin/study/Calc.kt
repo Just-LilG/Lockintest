@@ -416,7 +416,7 @@ internal object Calc {
         }
 
         private fun startsOperand(c: Char?): Boolean =
-            c != null && (c == '(' || c == 'π' || c == '√' || c == '∛' || c == '∞' || c == '∫' || c == '⟨' || c.isDigit() || c == '.' ||
+            c != null && (c == '(' || c == '{' || c == 'π' || c == '√' || c == '∛' || c == '∞' || c == '∫' || c == '⟨' || c.isDigit() || c == '.' ||
                 (c.isLetter() && !startsWith("mod") && !startsWith("ˣ√")))
 
         /** combo = unary (('P' | 'C') unary)*   nPr and nCr bind tighter than × and ÷. */
@@ -496,6 +496,17 @@ internal object Calc {
             if (c.isDigit() || c == '.') return number()
             if (c == 'π') { i++; return Value(PI) }
             if (c == '∞') { i++; return Value(Double.POSITIVE_INFINITY) }
+            if (c == '{') {
+                // A stacked fraction from the a/b key: {top|bottom}.
+                i++
+                val top = expr().v
+                if (peek() != '|') throw CalcException("Syntax error", i)
+                i++
+                val bottom = expr().v
+                if (peek() == '}') i++ // a missing closing mark is forgiven
+                if (bottom == 0.0) throw CalcException("Can't divide by 0")
+                return Value(top / bottom)
+            }
             if (c == '⟨') {
                 // A physical constant written as its symbol: ⟨c₀⟩, ⟨h⟩, ⟨G⟩.
                 val end = s.indexOf('⟩', i)

@@ -765,7 +765,7 @@ internal object CalcComplex {
                     c == '×' || c == '*' -> { i++; l *= unary() }
                     c == '÷' || c == '/' -> { i++; l /= unary() }
                     c == '∠' -> { i++; l = Cx.polar(l.re, unary().re / angle.perRadian) }
-                    c != null && (c == '(' || c == 'π' || c == '√' || c.isDigit() || c == '.' || c.isLetter()) -> l *= unary()
+                    c != null && (c == '(' || c == '{' || c == 'π' || c == '√' || c.isDigit() || c == '.' || c.isLetter()) -> l *= unary()
                     else -> return l
                 }
             }
@@ -799,6 +799,16 @@ internal object CalcComplex {
         fun primary(): Cx {
             val c = peek() ?: throw CalcException("Syntax error")
             if (c == '(') { i++; val v = expr(); if (peek() == ')') i++; return v }
+            if (c == '{') {
+                // A stacked fraction from the a/b key: {top|bottom}.
+                i++
+                val top = expr()
+                if (peek() != '|') throw CalcException("Syntax error")
+                i++
+                val bottom = expr()
+                if (peek() == '}') i++
+                return top / bottom
+            }
             if (c.isDigit() || c == '.') return Cx(number())
             if (c == 'π') { i++; return Cx(PI) }
             if (c == '√') { i++; return arg().sqrt() }

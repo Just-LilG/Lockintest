@@ -380,10 +380,9 @@ internal fun ClimbScene(
         // twangs (0.42 on), and rings spread out from them while their tag reads "Nudged!".
         val arrive = 0.42f
         val after = if (n > arrive) ((n - arrive) / (1f - arrive)).coerceIn(0f, 1f) else 0f
-        val hop = if (n > arrive) {
-            val k = ((n - arrive) / 0.32f).coerceIn(0f, 1f)
-            kotlin.math.sin(k * Math.PI).toFloat() * (1f - 0.35f * k)
-        } else 0f
+        // They jump for real (a flinch as the spark lands, a push-off, legs tucked, a landing that gives at the
+        // knees), done by the rig, not by lifting the whole figure.
+        val jump = nudgeJump(n)
         // The scene's own colours follow the theme (accent flags and sparks; grey snow on the light theme).
         SceneFx.accent = LockInColors.Lime.toArgb()
         SceneFx.light = !LockInColors.isDark
@@ -407,7 +406,7 @@ internal fun ClimbScene(
             if (themReached && !youReached && themLife.cheer.value < 0.1f) waitWave(4.5f) * 0.9f else 0f,
         )
         val pl = Rig.pose(YouSpec, you.value, t, youWave, youLife.life())
-        val pr = Rig.pose(PartnerSpec, partner.value, t, themWave, themLife.life())
+        val pr = Rig.pose(PartnerSpec, partner.value, t, themWave, themLife.life(), jump)
         val youTent = youLife.tent.value
         val themTent = themLife.tent.value
 
@@ -455,7 +454,7 @@ internal fun ClimbScene(
 
                 // The climbers, each on a soft shadow; asleep, they're tucked into a tent with a lamp on.
                 front.clear()
-                fun climber(spec: ClimberSpec, pose: Pose, tent: Float, lift: Float, phase: Float) {
+                fun climber(spec: ClimberSpec, pose: Pose, tent: Float, air: Float, phase: Float) {
                     val gx = spec.worldX(pose.hip.x)
                     val gy = Ground.y(gx)
                     if (tent > 0.01f) {
@@ -467,11 +466,10 @@ internal fun ClimbScene(
                     if (tent >= 0.99f) return
                     val k = 1f - tent
                     withTransform({
-                        translate(top = -lift)
                         scale(k, k, Offset(gx, gy))
                     }) {
                         val sh = ArrayList<FxPrim>(1)
-                        SceneFx.shadow(spec, pose.hip.x, 1f, sh)
+                        SceneFx.shadow(spec, pose.hip.x, 1f - 0.3f * air, sh)
                         drawFx(sh)
                         drawClimber(spec, pose)
                     }
@@ -480,11 +478,11 @@ internal fun ClimbScene(
                         val up = atan2(pose.head.x - pose.shoulder.x, -(pose.head.y - pose.shoulder.y))
                         val fx = cos(up) * spec.dir
                         val fy = sin(up)
-                        SceneFx.breath(spec.worldX(pose.head.x) + fx * 14f, pose.head.y + fy * 14f - lift, fx, fy - 0.25f, t, phase, front)
+                        SceneFx.breath(spec.worldX(pose.head.x) + fx * 14f, pose.head.y + fy * 14f, fx, fy - 0.25f, t, phase, front)
                     }
                 }
                 climber(YouSpec, pl, youTent, 0f, 0f)
-                climber(PartnerSpec, pr, themTent, hop * 34f, 1.6f)
+                climber(PartnerSpec, pr, themTent, jump.coerceAtLeast(0f), 1.6f)
                 flag.draw(this, t)
 
                 // In front: snow and mist, the summit burst, and a high five when both made it.
@@ -506,7 +504,6 @@ internal fun ClimbScene(
         // Name tags float above each climber's head (or above the tent).
         val padX = 8.dp.toPx()
         val padY = 3.dp.toPx()
-        val hopPx = hop * 34f * s
         fun headPx(spec: ClimberSpec, pose: Pose, tent: Float, lift: Float): Offset {
             val gx = spec.worldX(pose.hip.x)
             val hx = spec.worldX(pose.head.x)
@@ -514,7 +511,7 @@ internal fun ClimbScene(
             return Offset((hx + (gx - hx) * tent - SCENE_X) * s, oy + (hy - SCENE_Y) * s - lift)
         }
         val youHead = headPx(YouSpec, pl, youTent, 0f)
-        val themHead = headPx(PartnerSpec, pr, themTent, hopPx)
+        val themHead = headPx(PartnerSpec, pr, themTent, 0f)
         heads[0] = youHead.x; heads[1] = youHead.y
         heads[2] = themHead.x; heads[3] = themHead.y
 
@@ -599,6 +596,22 @@ internal fun ClimbScene(
 
 private fun nowHour(): Float = java.time.LocalTime.now().let { it.hour + it.minute / 60f }
 
+/**
+ * The partner's jump when a nudge lands, for [n] (0 to 1 over the whole nudge): a flinch crouch as the spark arrives
+ * (0.34 to 0.42), a leap (0.42 to 0.78, in the air from about 0.51 to 0.69), a landing that gives at the knees, then
+ * back to standing by 0.92. Below 0 is crouched, above 0 is in the air (1 = highest); the curve is continuous.
+ */
+private fun nudgeJump(n: Float): Float {
+    fun smooth(x: Float): Float { val v = x.coerceIn(0f, 1f); return v * v * (3f - 2f * v) }
+    return when {
+        n < 0.34f -> 0f
+        n < 0.42f -> -smooth((n - 0.34f) / 0.08f)
+        n < 0.78f -> -kotlin.math.cos(2.0 * Math.PI * (n - 0.42f) / 0.36f).toFloat()
+        n < 0.92f -> -1f + smooth((n - 0.78f) / 0.14f)
+        else -> 0f
+    }
+}
+
 /** A climber's moods as springs, so they ease from climbing into standing, cheering, tiring or a tent. */
 private class LifeSprings {
     val stand = Animatable(0f)
@@ -631,7 +644,7 @@ private class LifeSprings {
 
     fun cheerFor(scope: kotlinx.coroutines.CoroutineScope, millis: Long) {
         scope.launch {
-            cheer.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 300f))
+            cheer.animateTo(1f, spring(dampingRatio = 0.75f, stiffness = 130f))
             delay(millis)
             cheer.animateTo(0f, soft)
         }

@@ -254,7 +254,7 @@ private fun EntryCard(
 
 @Composable
 internal fun ExplainBody(r: com.godbless.lockin.data.AiExplanation) {
-    Text(r.summary, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 23.sp))
+    MathText(r.summary, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 23.sp))
     Spacer(Modifier.height(10.dp))
     r.points.forEachIndexed { i, p ->
         Row(Modifier.padding(bottom = 6.dp)) {
@@ -268,12 +268,12 @@ internal fun ExplainBody(r: com.godbless.lockin.data.AiExplanation) {
         Spacer(Modifier.height(4.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(LockInColors.Graphite).padding(12.dp)) {
             Text("For example", style = LockInText.Small.copy(color = LockInColors.Lime))
-            Text(r.example, style = LockInText.Sub.copy(color = LockInColors.Snow))
+            MathText(r.example, style = LockInText.Sub.copy(color = LockInColors.Snow))
         }
     }
     if (r.check.isNotBlank()) {
         Spacer(Modifier.height(8.dp))
-        Text("Check yourself: ${r.check}", style = LockInText.Small.copy(color = LockInColors.Mist))
+        MathText("Check yourself: ${r.check}", style = LockInText.Small.copy(color = LockInColors.Mist))
     }
 }
 
@@ -282,8 +282,8 @@ private fun CardsBody(store: StudyStore, e: AiEntry) {
     val cards = e.cards()
     cards.forEach { c ->
         Column(Modifier.padding(bottom = 8.dp)) {
-            Text(c.question, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 14.sp))
-            Text(c.answer, style = LockInText.Small.copy(color = LockInColors.Body))
+            MathText(c.question, style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 14.sp))
+            MathText(c.answer, style = LockInText.Small.copy(color = LockInColors.Body))
         }
     }
     // A set you never added (or only some of) can still be added later.
@@ -300,9 +300,9 @@ private fun CardsBody(store: StudyStore, e: AiEntry) {
 private fun QuizBody(qs: List<com.godbless.lockin.data.AiQuestion>) {
     qs.forEachIndexed { i, q ->
         Column(Modifier.padding(bottom = 10.dp)) {
-            Text("${i + 1}. ${q.question}", style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 14.sp))
-            Text(q.options.getOrNull(q.answer).orEmpty(), style = LockInText.Small.copy(color = LockInColors.Lime))
-            if (q.why.isNotBlank()) Text(q.why, style = LockInText.Small.copy(color = LockInColors.Body))
+            MathText("${i + 1}. ${q.question}", style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 14.sp))
+            MathText(q.options.getOrNull(q.answer).orEmpty(), style = LockInText.Small.copy(color = LockInColors.Lime))
+            if (q.why.isNotBlank()) MathText(q.why, style = LockInText.Small.copy(color = LockInColors.Body))
         }
     }
 }

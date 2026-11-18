@@ -323,7 +323,7 @@ internal fun AiQuizScreen(
                     Column(Modifier.fillMaxWidth()) {
                         Text("Question ${i + 1} of ${qs.size}", style = LockInText.Small.copy(color = LockInColors.Mist))
                         Spacer(Modifier.height(6.dp))
-                        Text(q.question, style = LockInText.Title.copy(fontSize = 22.sp, lineHeight = 29.sp))
+                        MathText(q.question, style = LockInText.Title.copy(fontSize = 22.sp, lineHeight = 29.sp))
                         Spacer(Modifier.height(16.dp))
                         q.options.forEachIndexed { o, option ->
                             Option(
@@ -361,7 +361,7 @@ internal fun AiQuizScreen(
                                     style = LockInText.Label.copy(color = if (picked == q.answer) LockInColors.Lime else LockInColors.Flare),
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text(q.why, style = LockInText.Sub.copy(color = LockInColors.Body))
+                                MathText(q.why, style = LockInText.Sub.copy(color = LockInColors.Body))
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     "See page ${q.page}",
@@ -418,7 +418,7 @@ private fun Option(letter: Char, text: String, state: Int, onClick: () -> Unit) 
         ) {
             Text(letter.toString(), style = LockInText.Label.copy(color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold))
         }
-        Text(text, style = LockInText.Sub.copy(color = fg, fontSize = 16.sp, lineHeight = 21.sp), modifier = Modifier.padding(start = 12.dp))
+        MathText(text, style = LockInText.Sub.copy(color = fg, fontSize = 16.sp, lineHeight = 21.sp), modifier = Modifier.padding(start = 12.dp))
     }
 }
 
@@ -678,8 +678,8 @@ internal fun CardsPanel(store: StudyStore, bookId: String, source: List<Pair<Str
                         if (on) Text("✓", style = LockInText.Small.copy(color = LockInColors.OnLime, fontSize = 13.sp))
                     }
                     Column(Modifier.padding(start = 12.dp)) {
-                        Text(c.question, style = LockInText.Label.copy(color = if (on) LockInColors.Snow else LockInColors.Mist, fontSize = 15.sp))
-                        Text(c.answer, style = LockInText.Small.copy(color = LockInColors.Body))
+                        MathText(c.question, style = LockInText.Label.copy(color = if (on) LockInColors.Snow else LockInColors.Mist, fontSize = 15.sp))
+                        MathText(c.answer, style = LockInText.Small.copy(color = LockInColors.Body))
                     }
                 }
             }

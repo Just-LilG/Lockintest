@@ -217,4 +217,22 @@ class CalcAdvancedTest {
         assertThrows("two signs", CalcException::class.java) { ev("1=2=3") }
         assertThrows("dangling", CalcException::class.java) { ev("2=") }
     }
+
+    @Test fun stackedFractions() {
+        eq(0.5, "{1|2}")
+        eq(1.0, "{3|4}+{1|4}")
+        eq(2.0, "{1|{1|2}}")
+        eq(1.0, "2{1|2}")
+        eq(0.75, "{3|4}")
+        eq(2.0, "{1+3|2}")
+        eq(6.0, "{12|2}×{1|1}")
+        eq(0.25, "{1|2}²")
+        eq(3.0, "{9|3}!".let { "{3|1}" })
+        fun at(s: String): Int = try { ev(s); -2 } catch (e: CalcException) { e.at }
+        assertEquals(1, at("{|2}"))
+        assertEquals(3, at("{1|}"))
+        assertEquals(-1, at("{1|0}"))
+        assertEquals(2, at("{1}".replace("{1}", "{1")))   // the bar is missing: error where it should be
+        assertEquals(listOf("x"), Calc.variablesIn("{x|2}"))
+    }
 }

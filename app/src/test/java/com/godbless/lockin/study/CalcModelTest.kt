@@ -420,14 +420,25 @@ class CalcModelTest {
         assertEquals("gcd(12,18)", pasted("gcd(12,18)"))
         assertEquals("1000", pasted("1 000"))
     }
-    @Test fun fractionKeyTypesASlashAndCarriesOn() {
+    @Test fun fractionKeyBuildsAStackedFractionAndCarriesOn() {
         val m = CalcModel()
-        m.tap("3", "a/b", "4", "+", "1", "a/b", "4", "=")
+        m.tap("3", "a/b", "4")
+        m.move(1)                                  // step out of the bottom, as on a real calculator
+        m.tap("+", "1", "a/b", "4", "=")
         assertEquals("1", m.resultText())
-        assertEquals("3/4+1/4", m.lastExpr)
+        assertEquals("{3|4}+{1|4}", m.lastExpr)
         val n = CalcModel()
         n.tap("1", "a/b", "2", "=", "a/b", "3", "=")
         assertEquals("1/6", n.resultText())
+        // typing "+" while still in the bottom keeps it in the bottom
+        val s = CalcModel()
+        s.tap("1", "a/b", "2", "+")
+        assertEquals("{1|2+}", s.expr)
+        // a pasted 3/4 is still an ordinary division
+        val p = CalcModel()
+        p.pasteText("3/4")
+        p.tap("=")
+        assertEquals("3/4", p.resultText())
         // the ÷ key still types ÷
         val k = CalcModel()
         k.tap("1", "÷", "2")
@@ -439,5 +450,167 @@ class CalcModelTest {
         m.tap("2", "+", "3", "=")
         assertEquals("2+3", m.inputText)
         assertEquals(3, m.inputCursor)
+    }
+
+    // ---- stacked fractions ----------------------------------------------------------------
+
+    private fun frac(m: CalcModel) = m.tap("a/b")
+
+    @Test fun fractionKeyTakesTheNumberBeforeIt() {
+        val m = CalcModel()
+        m.tap("5", "5", "6", "9", "6")
+        frac(m)
+        assertEquals("{55696|}", m.expr)
+        assertEquals(7, m.cursor)               // after the bar, in the bottom
+        m.tap("3")
+        assertEquals("{55696|3}", m.expr)
+        m.tap("=")
+        assertEquals("55696/3", m.resultText())
+        assertTrue(m.history[0].first == "{55696|3}")
+        assertEquals("55696÷3", prettySum(m.history[0].first))
+    }
+
+    @Test fun emptyFractionAndNavigation() {
+        val m = CalcModel()
+        frac(m)
+        assertEquals("{|}", m.expr)
+        assertEquals(1, m.cursor)               // in the top
+        m.tap("1")
+        m.move(3)                               // down: to the bottom
+        assertEquals(3, m.cursor)
+        m.tap("2")
+        assertEquals("{1|2}", m.expr)
+        m.move(2)                               // up: back to the top, no history browsing
+        assertEquals(2, m.cursor)
+        m.tap("=")
+        assertEquals("1/2", m.resultText())
+        assertEquals(0.5, m.ans, 1e-12)
+    }
+
+    @Test fun fractionTakesBracketsFunctionsAndPowers() {
+        fun top(setup: (CalcModel) -> Unit): String { val m = CalcModel(); setup(m); frac(m); return m.expr }
+        assertEquals("2+{3|}", top { it.tap("2", "+", "3") })
+        assertEquals("{(1+2)|}", top { it.tap("(", "1", "+", "2", ")") })
+        assertEquals("{sin(30)|}", top { it.tap("Sin", "3", "0", ")") })
+        assertEquals("{5²|}", top { it.tap("5", "x²") })
+        assertEquals("{1.5|}", top { it.tap("1", ".", "5") })
+        assertEquals("{√(9)|}", top { it.tap("√x", "9", ")") })
+        assertEquals("{Ans|}", top { it.tap("4", "="); })
+        assertEquals("{{1|2}|}", top { frac(it); it.tap("1"); it.move(3); it.tap("2"); it.move(1) })
+        assertEquals("3×{|}", top { it.tap("3", "×") })
+    }
+
+    @Test fun nestedFractionsWork() {
+        val m = CalcModel()
+        m.tap("1")
+        frac(m)                                 // {1|}
+        frac(m)                                 // nothing before the cursor in the bottom: {1|{|}}
+        assertEquals("{1|{|}}", m.expr)
+        m.tap("2")
+        m.move(3)
+        m.tap("3")
+        assertEquals("{1|{2|3}}", m.expr)
+        m.tap("=")
+        assertEquals("3/2", m.resultText())
+    }
+
+    @Test fun deletingFractions() {
+        val m = CalcModel()
+        m.tap("5")
+        frac(m)
+        assertEquals("{5|}", m.expr)
+        m.tap("DEL")                            // an empty bottom: take the fraction apart
+        assertEquals("5", m.expr)
+        m.tap("AC")
+        frac(m)
+        m.tap("DEL")                            // an empty fraction goes away
+        assertEquals("", m.expr)
+        m.tap("AC", "1", "2")
+        frac(m); m.tap("3", "4")
+        assertEquals("{12|34}", m.expr)
+        m.tap("DEL")
+        assertEquals("{12|3}", m.expr)
+        m.tap("DEL")
+        assertEquals("{12|}", m.expr)
+        m.tap("DEL", "DEL")                     // unwrap, then delete the 2
+        assertEquals("1", m.expr)
+        // DEL in front of a non-empty bottom steps over the bar instead
+        m.tap("AC", "7")
+        frac(m); m.tap("8")
+        m.move(0)
+        assertEquals(3, m.cursor)
+        m.tap("DEL")
+        assertEquals("{7|8}", m.expr)
+        assertEquals(2, m.cursor)
+    }
+
+    @Test fun incompleteFractionsPointAtTheGap() {
+        val m = CalcModel()
+        m.tap("3")
+        frac(m)
+        m.tap("=")
+        assertEquals("Syntax error", m.resultText())
+        assertEquals(m.expr.indexOf('}'), m.cursor)   // the cursor jumps into the empty bottom
+        m.tap("2")
+        m.tap("=")
+        assertEquals("3/2", m.resultText())
+        val e = CalcModel()
+        frac(e); e.tap("5", "=")
+        assertEquals("Syntax error", e.resultText())
+    }
+
+    @Test fun fractionsInsideOtherModes() {
+        val m = CalcModel()
+        m.tap("2", "×")
+        frac(m)
+        m.tap("1"); m.move(3); m.tap("4")
+        m.tap("=")
+        assertEquals("1/2", m.resultText())
+        val c = CalcModel()
+        c.tap("SHIFT", "2")                      // complex mode
+        c.tap("a/b", "1"); c.move(3); c.tap("2")
+        c.tap("SHIFT", "ENG")                    // i
+        c.tap("=")
+        assertTrue(c.resultText().isNotEmpty() && c.error.isEmpty())
+        val r = CalcModel.decode(CalcModel().also { it.tap("a/b", "1"); it.move(3); it.tap("3") }.encode())
+        assertEquals("{1|3}", r.expr)
+    }
+
+    @Test fun afterAnAnswerTheFractionKeyStartsOverAns() {
+        val m = CalcModel()
+        m.tap("6", "=")
+        frac(m)
+        assertEquals("{Ans|}", m.expr)
+        assertEquals(5, m.cursor)
+        m.tap("4", "=")
+        assertEquals("3/2", m.resultText())
+    }
+
+    @Test fun parsingAndCaretPieces() {
+        assertEquals(null, parseSum("{1|2"))
+        assertEquals(null, parseSum("1|2"))
+        assertEquals(null, parseSum("}"))
+        for (s in listOf("", "12", "{1|2}", "3+{4|5}×2", "{1|{2|3}}", "{|}", "{ab|cd}{e|f}", "{{1|2}|{3|4}}")) {
+            val nodes = parseSum(s)!!
+            for (c in 0..s.length) {
+                val piece = caretPiece(nodes, c)
+                assertTrue("$s at $c", piece != null)
+                // and that piece really holds the cursor
+                assertTrue("$s at $c", c >= piece!!.start && c <= piece.start + piece.text.length)
+            }
+        }
+        val top = parseSum("a{b|c}d")!!
+        assertEquals(3, top.size)
+        assertEquals("a", (top[0] as SumText).text)
+        assertEquals("d", (top[2] as SumText).text)
+        val f = top[1] as SumFrac
+        assertEquals(1, f.open); assertEquals(5, f.close)
+        assertEquals("b", (f.top[0] as SumText).text)
+        assertEquals(2, (f.top[0] as SumText).start)
+        assertEquals(4, (f.bottom[0] as SumText).start)
+        assertEquals("(1+2)÷3", prettySum("{1+2|3}"))
+        assertEquals("1÷2+3÷4", prettySum("{1|2}+{3|4}"))
+        assertEquals("1÷(2÷3)", prettySum("{1|{2|3}}"))
+        assertEquals("plain", prettySum("plain"))
     }
 }
