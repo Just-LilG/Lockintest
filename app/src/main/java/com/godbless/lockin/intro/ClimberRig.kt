@@ -28,6 +28,8 @@ internal class ClimberSpec(
     val dur: Float,
     /** Step length in scene units. 0 means "[dTotal] split into [steps]". */
     stride: Float = 0f,
+    /** Draws the climber with a ponytail and a slimmer build. Movement is the same. */
+    val female: Boolean = false,
 ) {
     val dTotal: Float = abs(xEnd - xs)
     val stepLen: Float = if (stride > 0f) stride else dTotal / steps
@@ -154,6 +156,12 @@ internal object Rig {
         return v * v * (3f - 2f * v)
     }
 
+    /** Quintic easing has zero velocity and acceleration at both ends: useful for planted feet and hand contacts. */
+    private fun smoother(x: Float): Float {
+        val v = clamp01(x)
+        return v * v * v * (v * (v * 6f - 15f) + 10f)
+    }
+
     /** Steepness (radians, positive) of the ground at local position [u], averaged over a short stretch so it doesn't jitter. */
     fun slopeAt(c: ClimberSpec, u: Float): Float {
         val a = c.worldX(u - 10f)
@@ -181,7 +189,9 @@ internal object Rig {
             val psi = phi + o
             val n = floor(psi)
             val f = psi - n
-            val s = if (f < 0.5f) 0f else easeInOutSine((f - 0.5f) / 0.5f)
+            // The boot stays completely planted for the stance phase, then rolls through a softly
+            // accelerated swing. Quintic easing prevents the foot from visibly snapping at lift-off/landing.
+            val s = if (f < 0.5f) 0f else smoother((f - 0.5f) / 0.5f)
             return 2f * step * (n + s) + step / 2f + shift
         }
 
@@ -189,9 +199,12 @@ internal object Rig {
             val psi = phi + o
             val f = psi - floor(psi)
             if (f < 0.5f) return 0f
-            // A real step: the toe leaves quickly, the foot peaks early and comes down slower to land softly.
-            val x = (f - 0.5f) / 0.5f
-            return 15f * sin(PI.toFloat() * x.pow(0.72f))
+            // A real step: clear the rock early, carry the boot through an arc, then lower it slowly
+            // so the landing reads as weight-bearing rather than a foot sliding into place.
+            val x = ((f - 0.5f) / 0.5f).coerceIn(0f, 1f)
+            val up = smoother((x / 0.42f).coerceIn(0f, 1f))
+            val down = 1f - smoother(((x - 0.42f) / 0.58f).coerceIn(0f, 1f))
+            return 18f * min(up, down)
         }
 
         /** How far each boot is tipped (toes down positive). Continuous all the way round the step. */
@@ -215,14 +228,19 @@ internal object Rig {
 
         val reach = CROUCH * (THIGH + SHIN)
         // A slow weight shift over the planted feet.
-        val hipX = d + 2.2f * sin(ph * 0.55f)
+        // The pelvis does not travel like a rigid trolley: it shifts over the loaded foot and
+        // counter-swings slightly as the free leg passes through.
+        val hipX = d + 2.2f * sin(ph * 0.55f) + 1.35f * sin(twoPi * phi - 0.32f)
         fun lowerBound(a: Pt): Float {
             val dx = a.x - hipX
             return a.y - sqrt(max(reach * reach - dx * dx, 1f))
         }
 
         // The hips are lowest just after each foot lands (taking the weight) and highest mid-stride.
-        val bob = 3f * cos(twoPi * 2f * phi - 0.45f)
+        // Two soft vertical impulses per full gait cycle (one for each footfall), with a small
+        // asymmetry so the body settles after landing instead of bouncing like a spring toy.
+        val gaitBeat = twoPi * 2f * phi
+        val bob = 2.6f * cos(gaitBeat - 0.48f) + 0.8f * sin(gaitBeat - 0.95f)
         // Tired climbers breathe deeper and slower.
         val breathRate = 2.1f - 0.7f * life.tired
         val breathe = (1.6f + 1.4f * life.tired) * sin(ph * breathRate)
@@ -234,7 +252,9 @@ internal object Rig {
         val slopeLean = (0.45f * Math.toDegrees((slopeNow - c.meanSlope).toDouble()).toFloat()).coerceIn(-9f, 9f)
 
         val look = pulse(ph, 8.5f, 2.2f)
-        var lean = Math.toRadians((LEAN_DEG + slopeLean + 4f * cos(twoPi * 2f * phi) - 1.4f * sin(ph * breathRate) - 6f * look * (1f - life.tired) - 10f * wave + 5f * life.tired).toDouble()).toFloat()
+        // A little forward drive on push-off, followed by a softer recovery over the planted foot.
+        val drive = 1.7f * sin(gaitBeat - 0.9f)
+        var lean = Math.toRadians((LEAN_DEG + slopeLean + 3.2f * cos(gaitBeat) + drive - 1.4f * sin(ph * breathRate) - 6f * look * (1f - life.tired) - 10f * wave + 5f * life.tired).toDouble()).toFloat()
         // The head tips back to look at the summit, and now and then lifts right up to check on it.
         var tilt = lean * 0.38f + 0.05f * sin(ph * 1.3f) - 0.42f * look * (1f - life.tired) - 0.25f * wave + 0.22f * life.tired
         // The head stays steady while the body rocks with each step, the way eyes keep a level horizon, and it
@@ -246,8 +266,10 @@ internal object Rig {
             val psi = phi + o
             val n = floor(psi)
             val f = psi - n
-            val s = if (f < 0.5f) 0f else easeInOutSine((f - 0.5f) / 0.5f)
-            val lift = if (f < 0.5f) 0f else 13f * sin(PI.toFloat() * ((f - 0.5f) / 0.5f).pow(0.8f))
+            val x = if (f < 0.5f) 0f else ((f - 0.5f) / 0.5f).coerceIn(0f, 1f)
+            val s = if (f < 0.5f) 0f else smoother(x)
+            // Hands clear the face/helmet on the way up, then settle onto the next hold with a soft contact.
+            val lift = if (f < 0.5f) 0f else 17f * sin(PI.toFloat() * x.pow(0.82f))
             val u = 2f * step * (n + s) + HAND_LEAD - 2f * step * o
             return Pt(u, Ground.y(c.worldX(u)) - 5f - lift)
         }
@@ -274,12 +296,13 @@ internal object Rig {
         var pitchA = footPitch(0f)
         var pitchB = footPitch(0.5f)
         val bendLeg = -1f
-        var pack = 0.10f * cos(twoPi * 2f * phiLag - 0.9f)
+        // Loose kit follows the torso a fraction late; the pack swings more on the recovery than the drive.
+        var pack = 0.145f * cos(twoPi * 2f * phiLag - 1.05f) + 0.035f * sin(twoPi * phiLag)
         var puff = life.tired
 
         // The pelvis and shoulders twist against each other with each step (the near hip comes forward as its
         // leg swings, the near shoulder goes back).
-        val twist = sin(twoPi * phi)
+        val twist = sin(twoPi * phi - 0.16f)
 
         // Where the shoulder is while climbing: the hands swing round it when they change what they're doing.
         val climbSh = Pt(hip.x + TORSO * sin(lean), hip.y - TORSO * cos(lean))
@@ -395,10 +418,12 @@ internal object Rig {
 
         // Pelvis and shoulders twist, each opposite the other, fading out when they stand.
         val tw = twist * twistK
-        val hipA = Pt(hip.x - 1.7f * tw, hip.y)
-        val hipB = Pt(hip.x + 1.7f * tw, hip.y)
-        val shA = Pt(sh.x + 2.0f * tw, sh.y)
-        val shB = Pt(sh.x - 2.0f * tw, sh.y)
+        // Pelvis and ribcage rotate against each other. The tiny vertical offsets make the
+        // shoulder line and belt line counter-roll, which sells the weight transfer.
+        val hipA = Pt(hip.x - 1.9f * tw, hip.y - 0.9f * tw)
+        val hipB = Pt(hip.x + 1.9f * tw, hip.y + 0.9f * tw)
+        val shA = Pt(sh.x + 2.3f * tw, sh.y + 1.15f * tw)
+        val shB = Pt(sh.x - 2.3f * tw, sh.y - 1.15f * tw)
 
         val legA = twoBone(hipA, footA, THIGH, SHIN, bendLeg)
         val legB = twoBone(hipB, footB, THIGH, SHIN, bendLeg)

@@ -74,7 +74,7 @@ internal class LocalLock(context: Context) {
         if (lockId != id) {
             // A new lock starts its own counts and warnings.
             ed.putInt(K_ESCAPES, 0).putStringSet(K_SENT, emptySet()).remove(K_BEAT_WALL).remove(K_BEAT_ELAPSED)
-                .remove(K_OWNER).remove(K_VOIDED)
+                .remove(K_OWNER).remove(K_VOIDED).remove("n_stopped").remove("n_emergency_dial")
         }
         if (!ownerId.isNullOrBlank() && (lockId != id || owner == null)) ed.putString(K_OWNER, ownerId)
         ed.putLong(K_ID, lockId)
@@ -199,8 +199,18 @@ internal class LocalLock(context: Context) {
         prefs.edit().putString(K_QUEUE, q.joinToString("\n")).apply()
     }
 
+    /** Takes one copy of [code] off the queue (repeatable warnings can sit in it more than once). */
     fun dequeue(code: String) {
-        prefs.edit().putString(K_QUEUE, queued().filter { it != code }.joinToString("\n")).apply()
+        val q = queued().toMutableList()
+        q.remove(code)
+        prefs.edit().putString(K_QUEUE, q.joinToString("\n")).apply()
+    }
+
+    /** Counts one more time [kind] was told during this lock, and returns the count (for warnings that may repeat). */
+    fun bump(kind: String): Int {
+        val n = prefs.getInt("n_$kind", 0) + 1
+        prefs.edit().putInt("n_$kind", n).apply()
+        return n
     }
 
     private companion object {

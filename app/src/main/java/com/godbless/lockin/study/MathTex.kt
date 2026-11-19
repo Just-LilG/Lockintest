@@ -54,6 +54,7 @@ internal sealed class MNode {
     class BigOp(val name: String) : MNode()
     class Style(val style: Int, val body: MNode) : MNode()
     class Font(val font: Int, val body: MNode) : MNode()
+    class Tint(val idx: Int, val body: MNode) : MNode()
     class Mat(val rows: List<List<MNode>>, val env: String, val spec: String?, val left: String, val right: String) : MNode()
 }
 
@@ -61,21 +62,59 @@ internal class MathError(msg: String) : Exception(msg)
 
 // ---- Drawing operations -----------------------------------------------------------------------------------------------
 internal sealed class MOp {
-    abstract fun shift(dx: Float, dy: Float): MOp
+    /** 0 = the text colour; 1..5 = lime, flare, sky, amber, mist (see [tintIndex]); 9 = the highlighter wash behind marked text. */
+    var tint: Int = 0
+
+    protected abstract fun move(dx: Float, dy: Float): MOp
+    fun shift(dx: Float, dy: Float): MOp { val m = move(dx, dy); m.tint = tint; return m }
+    fun tinted(i: Int): MOp { val m = move(0f, 0f); m.tint = i; return m }
+
     class Text(val x: Float, val y: Float, val text: String, val size: Float, val font: Int) : MOp() {
-        override fun shift(dx: Float, dy: Float) = Text(x + dx, y + dy, text, size, font)
+        /** The platform's measured text, set by the painter on the first draw so later frames do not look it up again. */
+        var cached: Any? = null
+        override fun move(dx: Float, dy: Float): MOp { val t = Text(x + dx, y + dy, text, size, font); t.cached = cached; return t }
     }
     class Rule(val x: Float, val y: Float, val w: Float, val h: Float) : MOp() {
-        override fun shift(dx: Float, dy: Float) = Rule(x + dx, y + dy, w, h)
+        override fun move(dx: Float, dy: Float): MOp = Rule(x + dx, y + dy, w, h)
     }
     class Line(val x1: Float, val y1: Float, val x2: Float, val y2: Float, val w: Float) : MOp() {
-        override fun shift(dx: Float, dy: Float) = Line(x1 + dx, y1 + dy, x2 + dx, y2 + dy, w)
+        override fun move(dx: Float, dy: Float): MOp = Line(x1 + dx, y1 + dy, x2 + dx, y2 + dy, w)
     }
     class Quad(val x1: Float, val y1: Float, val cx: Float, val cy: Float, val x2: Float, val y2: Float, val w: Float) : MOp() {
-        override fun shift(dx: Float, dy: Float) = Quad(x1 + dx, y1 + dy, cx + dx, cy + dy, x2 + dx, y2 + dy, w)
+        override fun move(dx: Float, dy: Float): MOp = Quad(x1 + dx, y1 + dy, cx + dx, cy + dy, x2 + dx, y2 + dy, w)
     }
     class Dot(val x: Float, val y: Float, val r: Float) : MOp() {
-        override fun shift(dx: Float, dy: Float) = Dot(x + dx, y + dy, r)
+        override fun move(dx: Float, dy: Float): MOp = Dot(x + dx, y + dy, r)
+    }
+    /** Not drawn: a piece of the formula (a fraction, a root, a variable...) the student can tap to have explained. */
+    class Spot(val x: Float, val y: Float, val w: Float, val h: Float, val node: MNode) : MOp() {
+        override fun move(dx: Float, dy: Float): MOp = Spot(x + dx, y + dy, w, h, node)
+    }
+}
+
+/** Colour names the AI may use (in text as {lime|a}, in maths as \textcolor{lime}{a}) to the [MOp.tint] they mean. */
+internal fun tintIndex(name: String): Int = when (name.trim().lowercase()) {
+    "lime", "green" -> 1
+    "flare", "red" -> 2
+    "sky", "blue" -> 3
+    "amber", "orange", "yellow" -> 4
+    "mist", "gray", "grey" -> 5
+    else -> 0
+}
+
+internal object MathHit {
+    /** The smallest tappable piece at ([px], [py]) in a box's own coordinates (origin on its baseline), or null. */
+    fun find(ops: List<MOp>, px: Float, py: Float, slop: Float): MOp.Spot? {
+        var best: MOp.Spot? = null
+        var bestArea = Float.MAX_VALUE
+        for (o in ops) {
+            if (o !is MOp.Spot) continue
+            if (px >= o.x - slop && px <= o.x + o.w + slop && py >= o.y - slop && py <= o.y + o.h + slop) {
+                val area = o.w * o.h
+                if (area < bestArea) { best = o; bestArea = area }
+            }
+        }
+        return best
     }
 }
 
@@ -384,7 +423,8 @@ private class MathParser(src: String) {
                 val k = when (n) { "displaystyle" -> ST_D; "textstyle" -> ST_T; "scriptstyle" -> ST_S; else -> ST_SS }
                 return MNode.Style(k, seq())
             }
-            "color", "textcolor" -> { rawGroup(); return if (n == "textcolor") groupOrAtom() else null }
+            "color" -> { val idx = tintIndex(rawGroup()); val rest = seq(); return if (idx == 0) rest else MNode.Tint(idx, rest) }
+            "textcolor" -> { val idx = tintIndex(rawGroup()); val body = groupOrAtom(); return if (idx == 0) body else MNode.Tint(idx, body) }
             "limits", "nolimits", "nonumber", "notag", "label", "tag", "hline", "middle", "protect", "relax", "mathstrut",
             "strut", "vphantom", "hphantom", "phantom" -> { if (n == "label" || n == "tag") rawGroup(); return null }
             "not" -> return MNode.Sym("̸", C_ORD, F_RM)
@@ -426,6 +466,7 @@ private fun isTall(n: MNode): Boolean = when (n) {
     is MNode.Seq -> n.items.any { isTall(it) }
     is MNode.Font -> isTall(n.body)
     is MNode.Style -> isTall(n.body)
+    is MNode.Tint -> isTall(n.body)
     is MNode.Lr -> isTall(n.body)
     else -> false
 }
@@ -498,7 +539,8 @@ internal object MathTex {
 }
 
 // ---- Layout -----------------------------------------------------------------------------------------------------------
-internal class MathLayout(private val m: MathMetrics, private val base: Float) {
+/** [spots]: leave the invisible tap targets (see [MOp.Spot]) in the boxes; only worth it where formulas can be tapped. */
+internal class MathLayout(private val m: MathMetrics, private val base: Float, private val spots: Boolean = false) {
 
     private fun fs(st: Int) = base * SCALE[st]
 
@@ -627,13 +669,31 @@ internal class MathLayout(private val m: MathMetrics, private val base: Float) {
     }
 
     // --- the dispatcher
+    private fun spotted(n: MNode): Boolean = when (n) {
+        is MNode.Frac, is MNode.Sqrt, is MNode.Lr, is MNode.Acc, is MNode.Mat, is MNode.BigOp, is MNode.Scripts -> true
+        is MNode.Sym -> n.font == F_IT
+        else -> false
+    }
+
     private fun lay(n: MNode, st: Int): MBox {
+        val b = layNode(n, st)
+        if (!spots || !spotted(n)) return b
+        val ops = ArrayList<MOp>(b.ops.size + 1)
+        ops.addAll(b.ops)
+        ops.add(MOp.Spot(0f, -b.asc, b.w, b.height, n))
+        return MBox(b.w, b.asc, b.desc, ops)
+    }
+
+    private fun tintBox(b: MBox, idx: Int) = MBox(b.w, b.asc, b.desc, b.ops.map { if (it.tint == 0) it.tinted(idx) else it })
+
+    private fun layNode(n: MNode, st: Int): MBox {
         val em = fs(st)
         return when (n) {
             is MNode.Seq -> laySeq(n.items, st)
             is MNode.Sym -> glyphs(n.text, n.font, st)
             is MNode.Txt -> glyphs(n.text, n.font, st)
             is MNode.Font -> lay(withFont(n.body, n.font), st)
+            is MNode.Tint -> tintBox(lay(n.body, st), n.idx)
             is MNode.Space -> MBox(n.em * em, 0f, 0f, emptyList())
             is MNode.Fn -> glyphs(n.name, F_RM, st)
             is MNode.Style -> lay(n.body, n.style)
@@ -1040,5 +1100,52 @@ internal class MathLayout(private val m: MathMetrics, private val base: Float) {
         for (j in 0 until max(0, ncol - 1)) w += gaps[j]
         val box = MBox(w, totalH / 2 + axis, totalH / 2 - axis, ops)
         return if (n.left != "." || n.right != ".") delimit(n.left, n.right, box, cellSt) else box
+    }
+}
+
+// ---- A tapped piece back to LaTeX -----------------------------------------------------------------------------------------
+internal object MathSrc {
+    private val REV: Map<String, String> by lazy {
+        val m = HashMap<String, String>()
+        for ((k, v) in GREEK) m.putIfAbsent(v, "\\$k ")
+        for ((k, v) in GREEK_UP) m.putIfAbsent(v, "\\$k ")
+        for ((k, v) in SYMS) if (k[0].isLetter()) m.putIfAbsent(v.first, "\\$k ")
+        m
+    }
+    private val TINTS = listOf("", "lime", "flare", "sky", "amber", "mist")
+
+    private fun delim(d: String): String = when (d) {
+        "{" -> "\\{"; "}" -> "\\}"; "⟨" -> "\\langle "; "⟩" -> "\\rangle "; "⌊" -> "\\lfloor "; "⌋" -> "\\rfloor "
+        "⌈" -> "\\lceil "; "⌉" -> "\\rceil "; "‖" -> "\\| "; else -> d
+    }
+
+    /** LaTeX for [n] that [MathTex.parse] reads back to the same thing (used to ask the AI about a tapped piece). */
+    fun tex(n: MNode): String = when (n) {
+        is MNode.Seq -> n.items.joinToString("") { tex(it) }
+        is MNode.Sym -> REV[n.text] ?: (if ("{}%$&#_".indexOf(n.text[0]) >= 0) "\\" + n.text else if (n.text == "−") "-" else n.text)
+        is MNode.Txt -> if (n.font == F_IT) "\\textit{" + n.text + "}" else "\\text{" + n.text + "}"
+        is MNode.Fn -> "\\" + n.name + " "
+        is MNode.Space -> "\\, "
+        is MNode.Frac -> (if (n.bar) "\\frac{" else "\\binom{") + tex(n.num) + "}{" + tex(n.den) + "}"
+        is MNode.Scripts -> {
+            val base = n.base
+            val b = if (base is MNode.Seq && base.items.size > 1) "{" + tex(base) + "}" else tex(base)
+            b + (if (n.sub != null) "_{" + tex(n.sub) + "}" else "") + (if (n.sup != null) "^{" + tex(n.sup) + "}" else "")
+        }
+        is MNode.Sqrt -> (if (n.index != null) "\\sqrt[" + tex(n.index) + "]{" else "\\sqrt{") + tex(n.body) + "}"
+        is MNode.Lr -> {
+            val body = n.body
+            if (n.left == "(" && n.right == ")" && body is MNode.Frac && !body.bar) tex(body)
+            else "\\left" + delim(n.left) + tex(body) + "\\right" + delim(n.right)
+        }
+        is MNode.Acc -> "\\" + n.kind + "{" + tex(n.body) + "}"
+        is MNode.BigOp -> "\\" + n.name + " "
+        is MNode.Style -> tex(n.body)
+        is MNode.Font -> if (n.font == F_BF) "\\mathbf{" + tex(n.body) + "}" else tex(n.body)
+        is MNode.Tint -> "\\textcolor{" + TINTS[n.idx.coerceIn(0, 5)] + "}{" + tex(n.body) + "}"
+        is MNode.Mat -> {
+            val rows = n.rows.joinToString(" \\\\ ") { r -> r.joinToString(" & ") { tex(it) } }
+            "\\begin{" + n.env + "}" + (if (n.spec != null) "{" + n.spec + "}" else "") + rows + "\\end{" + n.env + "}"
+        }
     }
 }

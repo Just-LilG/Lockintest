@@ -13,7 +13,7 @@ import com.godbless.lockin.intro.easeInOutSine
  * welcome page hand its mountain to Home without anyone jumping.
  */
 internal val HomeYouSpec = ClimberSpec(135f, 1f, 12, 520f, 0f, 1f, stride = 31f)
-internal val HomePartnerSpec = ClimberSpec(1115f, -1f, 13, 708f, 0f, 1f, stride = 28.8f)
+internal val HomePartnerSpec = ClimberSpec(1115f, -1f, 13, 708f, 0f, 1f, stride = 28.8f, female = true)
 
 /** Home spells progress as 0 to 1 along the whole route; this finds it for a distance already walked. */
 internal fun progressAtDistance(spec: ClimberSpec, distance: Float): Float {

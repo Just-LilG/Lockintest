@@ -43,6 +43,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -124,7 +126,7 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         }
         if (intent?.action == ActionDial) {
             dialPauseUntil = SystemClock.elapsedRealtime() + 45_000L
-            warn("emergency_dial")
+            warn("emergency_dial", repeat = true)
         }
         if (loop?.isActive != true) loop = scope.launch { run() }
         return START_STICKY
@@ -153,7 +155,7 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             // Restarted into safe mode, where LockIn can't run: tell the locker and count it as a try to leave.
             local.addEscape()
             warn("safe_mode|${(gap / 60_000L).coerceAtLeast(1)}")
-        } else if (local.active && gap > 90_000L) warn("stopped|${(gap / 60_000L).coerceAtLeast(1)}")
+        } else if (local.active && gap > 90_000L) warn("stopped|${(gap / 60_000L).coerceAtLeast(1)}", repeat = true)
 
         guard.hardenForLock(true)
         var beatAt = 0L
@@ -161,6 +163,13 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         var sessionAt = 0L
         var coverWasUp = false
         var lastSettingsHome = 0L
+        // How long another app has sat on screen under a cover that should be up (see below), and the last Home sent for it.
+        var strangerSince = 0L
+        var lastStrangerHome = 0L
+        var guardFloatSince = 0L
+        var lastStrangerLock = 0L
+        // The allowed apps the other-apps hold (device owner) was last set for.
+        var heldFor: Set<String>? = null
         // Whether LockIn was on screen last time round: leaving it is what counts as an escape.
         var wasInApp = Push.inForeground
         var wasInAllowed = false
@@ -224,6 +233,15 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             }
             allowedApps = if (local.id > 0L) allowedStore.load() else emptyList()
             coverAllowed.value = allowedApps
+            // Device owner: every other app is suspended for the lock, so none of them can open at all (no floating
+            // window, no split screen). Set again whenever your partner changes the allowed apps.
+            if (local.id > 0L) {
+                val keepNow = allowedApps.map { it.pkg }.toSet()
+                if (keepNow != heldFor) {
+                    heldFor = keepNow
+                    guard.holdOthers(keepNow + allowed + HelperPkgs)
+                }
+            }
             if (!local.active) break
 
             // Something switched off what holds the lock: tell the locker (once each).
@@ -260,6 +278,43 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                 inAllowed = !Push.inForeground && visible.isNotEmpty() && core.all { it in allowedPkgs }
                 bareHome = visible.isEmpty()
             }
+            // An allowed app is judged from the usage log alone, which needs app-time access and can lag behind the app
+            // coming up: with it off or late, the lock saw "no allowed app on screen", covered it and sent you back to
+            // LockIn, which looks like the app closing. The guard's exact window list settles it when it is on.
+            if (!inAllowed && !Push.inForeground) {
+                val ws2 = SettingsGuardService.appWindows()
+                if (ws2 != null) {
+                    val vis = ws2.map { it.pkg }.filter { it.isNotEmpty() && it != packageName && it != "android" && it !in allowed }
+                    if (vis.isNotEmpty() && vis.filter { it !in helpers }.all { it in allowedPkgs }) {
+                        inAllowed = true
+                        bareHome = false
+                    }
+                }
+            }
+            // LockIn is "in front" but may only be a small floating window (Xiaomi/HyperOS small window, freeform, split
+            // screen) with another app full screen behind it, fully usable. The usage log can miss that (it needs
+            // app-time access, and judges by who resumed last), so the guard's exact window list decides too: LockIn
+            // not filling the screen, or any other non-allowed app window beside it, means the cover is wanted.
+            // Not while an allowed app is coming up (LockIn's window is mid-animation and looks small), not while an
+            // allowed app fills the screen, and only once it has held for 1.5 s.
+            var guardFloat = false
+            if (Push.inForeground && !opening && now >= backUntil) {
+                val ws = SettingsGuardService.appWindows()
+                if (ws != null && ws.none { it.pkg in allowedPkgs && it.full }) {
+                    val smallMine = ws.any { it.pkg == packageName } && ws.none { it.pkg == packageName && it.full }
+                    val beside = ws.any {
+                        it.pkg.isNotEmpty() && it.pkg != packageName && it.pkg != "android" && !it.pip &&
+                            it.pkg !in allowed && it.pkg !in allowedPkgs && it.pkg !in helpers
+                    }
+                    guardFloat = smallMine || beside
+                }
+            }
+            if (guardFloat) {
+                if (guardFloatSince == 0L) guardFloatSince = now
+                if (now - guardFloatSince > 1_500L) floating = true
+            } else {
+                guardFloatSince = 0L
+            }
             // Left an allowed app for the home screen: that's just finishing with it. Back to LockIn's lock page.
             if (wasInAllowed && !inAllowed && bareHome && !Push.inForeground && !opening) {
                 backUntil = now + 2_500L
@@ -273,10 +328,12 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             coverFloating.value = floating
             // A call steps the cover aside so it can be answered, but only while nothing else is on screen:
             // ringing your own number and then opening a game must not switch the cover off.
-            val stranger = watcher != null && runCatching {
-                watcher.onScreen.any { it != packageName && it !in allowed && it !in allowedPkgs }
-            }.getOrDefault(false)
-            val coverWanted = ((!Push.inForeground && !inAllowed) || floating) && !settling && !(inCall() && !stranger) && now > dialPauseUntil && guard.screenOn()
+            // The emergency-dialer pause works the same way: it used to switch the cover off for a flat 45 s, so
+            // tapping "Emergency call" and then opening any app gave 45 s of free use (and the button is always there to
+            // do it again). Now both steps aside only while nothing but the phone app / home screen is up.
+            val pauseActive = inCall() || now <= dialPauseUntil
+            val stranger = pauseActive && strangerOnScreen(watcher, allowed, allowedPkgs)
+            val coverWanted = ((!Push.inForeground && !inAllowed) || floating) && !settling && !(pauseActive && !stranger) && guard.screenOn()
             // With "display over other apps" off, the guard (an accessibility window) draws the cover instead.
             val wantCover = coverWanted && guard.canOverlay()
             val wantFallback = coverWanted && !guard.canOverlay() && SettingsGuardService.running()
@@ -304,11 +361,31 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                     com.godbless.lockin.usage.ScreenKinds.goHome(this)
                 }
             }
+            // The cover is only a window drawn over the app, and Android can hide it: Android 12+ lets any app ask for
+            // "hide overlay windows" while it is on screen, and some system and OEM screens do it too. Our own
+            // bookkeeping would still say "cover up", so that app would stay usable. If another app stays on screen while
+            // the cover should be up, send the person Home (which also stops it running behind the cover).
+            if (coverWanted && strangerOnScreen(watcher, allowed, allowedPkgs)) {
+                if (strangerSince == 0L) {
+                    strangerSince = now
+                } else if (now - strangerSince > 2_500L && now - lastStrangerHome > 3_000L) {
+                    lastStrangerHome = now
+                    com.godbless.lockin.usage.ScreenKinds.goHome(this)
+                }
+                // Still there after Home was sent several times: lock the screen. Unlocking brings the cover straight back.
+                if (now - strangerSince > 9_000L && now - lastStrangerLock > 20_000L) {
+                    lastStrangerLock = now
+                    if (!guard.lockScreenNow()) SettingsGuardService.lockScreen()
+                }
+            } else {
+                strangerSince = 0L
+            }
             if (wantCover) showCover() else hideCover()
             if (wantFallback) SettingsGuardService.showLockCover(local.by, coverLeft.intValue) else SettingsGuardService.hideLockCover()
             coverWasUp = coverWanted
 
-            delay(if (wantCover || wantFallback) 500L else 1_000L)
+            // Waits for the next round, but wakes at once when the guard sees a window open, close or move.
+            withTimeoutOrNull(if (wantCover || wantFallback) 500L else 1_000L) { wake.receive() }?.let { delay(250L) }
         }
 
         // The lock is over.
@@ -325,6 +402,27 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         return withContext(Dispatchers.IO) { app.auth.restore() } is AuthResult.SignedIn
     }
 
+    /**
+     * Another app (not LockIn, the home screen, the phone app or an allowed app) is on screen. Read from the usage log
+     * when app-time access is on, and from the guard's window list when the guard is on: either one is enough, so
+     * switching off one of the two doesn't blind this.
+     */
+    private fun strangerOnScreen(
+        watcher: com.godbless.lockin.usage.ForegroundWatcher?,
+        allowed: Set<String>,
+        allowedPkgs: Set<String>,
+    ): Boolean {
+        fun other(p: String) = p.isNotEmpty() && p != packageName && p != "android" && p !in allowed && p !in allowedPkgs
+        // The guard's window list is exact; the usage log lags and keeps stale entries. So the guard decides when it can,
+        // and the usage log only when the guard is off or could not read a window's package.
+        val wins = SettingsGuardService.appWindows()
+        if (wins != null) {
+            if (wins.any { other(it.pkg) && !it.pip }) return true
+            if (wins.none { it.pkg.isEmpty() }) return false
+        }
+        return watcher != null && runCatching { watcher.onScreen.any { other(it) } }.getOrDefault(false)
+    }
+
     /** A phone call is ringing or on: the cover steps aside so it can be answered. */
     private fun inCall(): Boolean {
         val mode = (getSystemService(Context.AUDIO_SERVICE) as AudioManager).mode
@@ -333,14 +431,20 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
     // ----- Warnings to the locker -----
 
-    private fun warn(kind: String) {
+    private fun warn(kind: String, repeat: Boolean = false) {
         // Warnings go to the partner who locked you. A crew session you joined yourself has nobody to warn.
         if (local.id < 0L) return
         val key = kind.substringBefore('|')
         // A protection switched off for real voids the lock: no session is written for it (the server does the same).
         if (key in VoidKinds) local.markVoided()
-        if (local.alreadySent(key)) return
-        local.markSent(key)
+        if (repeat) {
+            // Things that can happen again (LockIn was stopped again, the emergency dialer used again) are told each
+            // time, up to a few. Once per lock hid every one after the first: stop LockIn, wait, repeat.
+            if (local.bump(key) > MaxRepeatWarnings) return
+        } else {
+            if (local.alreadySent(key)) return
+            local.markSent(key)
+        }
         local.enqueue("lock_tamper|$kind")
         Log.i(TAG, "warning queued: $kind")
     }
@@ -378,6 +482,12 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         }
         runCatching { getSystemService(android.telecom.TelecomManager::class.java)?.defaultDialerPackage?.let { out.add(it) } }
         out.add("com.android.systemui")
+        // The call screen is a separate app on many phones (and the emergency dialer another): with the stricter
+        // "step aside only while nothing else is up" rule, a call must never be taken for "another app".
+        out.addAll(listOf(
+            "com.android.incallui", "com.android.phone", "com.android.server.telecom", "com.android.emergency",
+            "com.google.android.dialer", "com.android.dialer", "com.samsung.android.incallui", "com.samsung.android.dialer",
+        ))
         return out
     }
 
@@ -444,7 +554,7 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     /** Opens the dialer for an emergency call. The cover steps aside for 45 s (a call keeps it aside) and the locker is told. */
     private fun emergencyDial() {
         dialPauseUntil = SystemClock.elapsedRealtime() + 45_000L
-        warn("emergency_dial")
+        warn("emergency_dial", repeat = true)
         hideCover()
         runCatching {
             startActivity(Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -515,7 +625,17 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         private const val TAG = "LockInLock"
         private const val Channel = "partner_lock"
         private const val NotificationId = 1003
+
+        /** How many times one repeatable warning (stopped, emergency dialer) is told to the locker in a single lock. */
+        private const val MaxRepeatWarnings = 5
         internal const val ActionDial = "com.godbless.lockin.LOCK_DIAL"
+
+        /** The guard taps this when a window changes, so the lock looks right away (conflated: many taps are one). */
+        private val wake = Channel<Unit>(Channel.CONFLATED)
+
+        internal fun nudge() {
+            wake.trySend(Unit)
+        }
 
         /** When an allowed app was last opened (elapsed realtime): the cover holds back while it comes up. */
         @Volatile

@@ -69,6 +69,24 @@ const MATH = String.raw`MATHS FORMAT (the app draws it as real, typeset maths):
 - In a worked solution, give each step on its own $$...$$ line with one short sentence of words between steps.
 - The reply is JSON, so every backslash inside a string must be doubled: write \\frac so the JSON holds \frac.`;
 
+const F3 = "```"; // a code fence, kept out of the template literals below
+const FORMAT = String.raw`PAGE ELEMENTS (the app draws these as real parts of a page; use one only when it helps, never as decoration, and not at all for a one-line answer):
+- Table: a markdown table with a header row and a |---|---| row, to compare things or list term / meaning / formula. Maths inside cells is fine.
+- Callout: one thing the student must not miss, as a line starting "> Tip: ", "> Watch out: ", "> Remember: " or "> Example: ".
+- Colour: {lime|word} {sky|word} {amber|word} {flare|word} mark a key term. Use the SAME colour for the same thing everywhere, also inside its formula: $\textcolor{lime}{a}x^2 + bx + c$. Use ==text== to highlight. At most 3 colours in one answer, never whole sentences.
+- Short heading: "## Title", only in a long answer.
+- Graph of a function: a fenced block like
+${F3}plot
+y = x^2 - 4x + 3
+x: -1..5
+points: (2,-1) vertex; (1,0) root
+${F3}
+  Optional lines: "y: -2..8", "title: ...", and "param: a = 1 [-3..3]" (the student gets a slider; up to 3 params). The expression may use only x and the params.
+- Diagram: ${F3}flow ("A -> B -> C", one chain per line, "A -> B : label"), ${F3}cycle (one step per line, or A -> B -> C -> A) or ${F3}timeline ("1905: what happened", one per line). At most 10 boxes, short labels.
+- Code: a fenced block with its language. Quote: lines starting "> ".
+- A numbers-only equation such as $2^3 + 4 = 12$ is checked by the app, so check your arithmetic.
+- In the JSON reply a line break inside a string is \n.`;
+
 const RULES = `You are LockIn's study helper for a student.
 Use ONLY what is on the textbook pages shown. Do not add outside facts. If a page is blank, a cover, a contents
 page or unreadable, ignore it. Write in clear, friendly, simple English. Each page image is introduced by a line
@@ -86,7 +104,8 @@ Explain it AS THIS BOOK USES IT: if the word has an everyday meaning and a speci
 You may use general knowledge to make the meaning clear, but stay true to what the page says. Plain, friendly English; short sentences.
 If the selection is an equation, say what each symbol stands for and what the equation tells you.
 If you cannot read the selection, set "text" to "" and "answer" to one sentence asking the student to select it again a little larger.
-${MATH}`;
+${MATH}
+${FORMAT}`;
   const prior = x.prior ? `\nAlready said to the student about this selection (don't repeat it): ${x.prior}` : "";
   if (x.mode === "ask") {
     return `${base}${prior}
@@ -332,7 +351,7 @@ function plan(task: string, count: number, pages: Page[]): Shard[] {
 }
 
 const tokensFor = (task: string, count: number) =>
-  task === "quiz" ? count * 520 + 600 : task === "cards" ? count * 240 + 500 : task === "simplify" ? 1000 : task === "passage" ? 1500 : 2100;
+  task === "quiz" ? count * 520 + 600 : task === "cards" ? count * 240 + 500 : task === "simplify" ? 1000 : task === "passage" ? 2300 : 2100;
 
 const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().slice(0, 70);
 
@@ -511,13 +530,13 @@ function clean(task: string, raw: any, pages: Page[], count: number) {
   if (task === "passage") {
     return {
       text: s(raw?.text, 400),
-      meaning: s(raw?.meaning, 700),
-      context: s(raw?.context, 500),
-      example: s(raw?.example, 500),
+      meaning: s(raw?.meaning, 1000),
+      context: s(raw?.context, 700),
+      example: s(raw?.example, 800),
       terms: (Array.isArray(raw?.terms) ? raw.terms : []).slice(0, 4)
         .map((t: any) => ({ term: s(t?.term, 60), meaning: s(t?.meaning, 200) }))
         .filter((t: any) => t.term && t.meaning),
-      answer: s(raw?.answer, 900),
+      answer: s(raw?.answer, 1400),
     };
   }
   if (task === "quiz") {

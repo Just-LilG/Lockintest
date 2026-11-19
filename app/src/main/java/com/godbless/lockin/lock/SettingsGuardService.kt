@@ -106,6 +106,12 @@ class SettingsGuardService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val e = event ?: return
+        // A window opened, closed, moved or resized (a floating window, split screen): wake the lock service now
+        // instead of waiting for its next round, so a cover is up before the other app can be used.
+        if (e.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            LockService.nudge()
+            return
+        }
         val pkg = e.packageName?.toString() ?: return
         if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != packageName) topPkg = pkg
         if (pkg == packageName || !watched(pkg)) return
@@ -141,7 +147,11 @@ class SettingsGuardService : AccessibilityService() {
     private fun watched(pkg: String): Boolean {
         val p = pkg.lowercase()
         return p == "android" || "settings" in p || "packageinstaller" in p || "permissioncontroller" in p ||
-            "phonemaster" in p || "securitycenter" in p || "safecenter" in p || "appmanager" in p || "systemmanager" in p
+            "phonemaster" in p || "securitycenter" in p || "safecenter" in p || "appmanager" in p || "systemmanager" in p ||
+            // Phone makers' battery and "device care" screens, where an app can be put to sleep or force-stopped:
+            // Samsung Device care, Oppo/Realme/OnePlus phone manager and battery, Vivo/iQOO, Xiaomi power keeper.
+            "phonemanager" in p || "lool" in p || "sm_cn" in p || "devicecare" in p || "iqoo.secure" in p ||
+            "vivo.abe" in p || "oplus.battery" in p || "powerkeeper" in p
     }
 
     /** The page's own title or class says it is about LockIn, or it is a device-admin or uninstall screen. */
@@ -628,6 +638,13 @@ class SettingsGuardService : AccessibilityService() {
                 if (target.isFocused) return@runCatching me.performGlobalAction(GLOBAL_ACTION_BACK)
                 false
             }.getOrDefault(false)
+        }
+
+        /** Locks the screen through the accessibility service (Android 9+). True if it did. */
+        fun lockScreen(): Boolean {
+            val me = instance ?: return false
+            if (android.os.Build.VERSION.SDK_INT < 28) return false
+            return me.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
 
         /** Sends the person Home (for an app that hit its limit) when no overlay can be drawn. */

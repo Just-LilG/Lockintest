@@ -81,4 +81,49 @@ class RichSplitTest {
         assertTrue(RichSplit.isRich(RichSplit.blocks("- a list")))
         assertTrue(RichSplit.isRich(RichSplit.blocks("\$\$x\$\$")))
     }
+
+    // ---- page elements
+    @Test fun headingsRulesAndColour() {
+        val b = RichSplit.blocks("## What it means\nA {lime|green \$a\$} word, ==marked== here.\n---")
+        assertTrue(b[0] is Block.Heading && (b[0] as Block.Heading).level == 2)
+        val spans = (b[1] as Block.Para).spans
+        assertTrue(spans.any { it is Span.Math && it.tex == "a" && it.color == tintIndex("lime") })
+        assertTrue(spans.any { it is Span.Txt && it.mark && it.text == "marked" })
+        assertTrue(b[2] === Block.Rule)
+        assertTrue(RichSplit.isRich(b))
+        assertFalse(RichSplit.isRich(RichSplit.blocks("a - b and 2 --- 3")))
+    }
+
+    @Test fun tablesKeepMathsAndPipes() {
+        val b = RichSplit.blocks("| Term | Meaning |\n|:--|--:|\n| \$x^2\$ | a square |\n| \$|x|\$ | absolute value |\nafter")
+        val t = b[0] as Block.Table
+        assertEquals(listOf('l', 'r'), t.aligns)
+        assertEquals(2, t.rows.size)
+        assertEquals("|x|", (t.rows[1][0][0] as Span.Math).tex) // the pipes inside maths are not column breaks
+        assertTrue(b[1] is Block.Para)
+        val short = RichSplit.blocks("| a | b | c |\n|---|---|---|\n| 1 |")[0] as Block.Table
+        assertEquals(3, short.rows[0].size)
+        assertTrue(RichSplit.blocks("a | b")[0] is Block.Para) // no separator row: not a table
+    }
+
+    @Test fun calloutsAndQuotes() {
+        val b = RichSplit.blocks("> Tip: Factor out \$a\$ first.\n> It keeps \$x^2\$ simple.\n\n> just a quote")
+        val c = b[0] as Block.Callout
+        assertEquals("tip", c.kind)
+        assertEquals(2, c.body.size)
+        assertTrue(b[1] is Block.Quote)
+    }
+
+    @Test fun fencesBecomeGraphsDiagramsAndCode() {
+        val b = RichSplit.blocks("before\n```plot\ny = x^2\nx: -1..1\n```\nafter\n```flow\nA -> B\n```\n```kotlin\nval x = 1\n```\n```plot\nnot a graph\n```")
+        assertEquals(listOf("Para", "Plot", "Para", "Diagram", "Code", "Code"), b.map { it::class.simpleName })
+        assertEquals("kotlin", (b[4] as Block.Code).lang)
+        assertEquals("not a graph", (b[5] as Block.Code).text) // an unreadable plot is shown as code, not lost
+    }
+
+    @Test fun unclosedMarkupNeverThrowsOrLoops() {
+        for (t in listOf("an unclosed {lime|colour and ==mark", "```plot\ny = x", "| a |\n|--|", "> Tip:", "## ", "{lime|{sky|x}")) {
+            assertTrue(t, RichSplit.blocks(t).isNotEmpty() || t.isEmpty())
+        }
+    }
 }

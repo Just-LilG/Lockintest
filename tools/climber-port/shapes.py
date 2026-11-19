@@ -5,8 +5,8 @@ from rig import Pt, HEAD_R, ground_grade
 
 (INK,JACKET,JACKET_FAR,PANTS,PANTS_FAR,BOOT,GLOVE,PACK,ROLL,HELMET,FACE,GEAR,GOGGLE,ROPE,ACCENT,SHINE,
  JACKET_SHADE,METAL,PANTS_SHADE,GAITER,SOLE,LENS,HOOD,SLEEVE_SHADE,GLOVE_HI,FACE_SHADE,PACK_SHADE,PACK_LID,
- PANTS_HI,JACKET_DEEP,PANTS_DEEP,HELMET_SHADE,PACK_DEEP)=range(33)
-PAL=[0xFF0B0B0C,0xFFEAEAF3,0xFFC9C9D6,0xFF8F8FA0,0xFF6E6E7E,0xFF34343E,0xFF42424E,0xFFB0B0C2,0xFF9494A8,0xFFF8F8FB,0xFFBDBDCB,0xFF3C3C48,0xFF2E2E38,0xFF9A9AA8,0xFFC6F432,0xFFFFFFFF,0xFFDCDCE6,0xFF6A6A78,0xFF7A7A8A,0xFF50505E,0xFF1C1C24,0xFF1B2230,0xFFE6E6F0,0xFFD6D6E2,0xFF5E5E6C,0xFFA6A6B8,0xFF8E8EA2,0xFFA2A2B6,0xFFABABBD,0xFFA6A6BC,0xFF585868,0xFFC9C9D8,0xFF76768C]
+ PANTS_HI,JACKET_DEEP,PANTS_DEEP,HELMET_SHADE,PACK_DEEP,HAIR,HAIR_HI,EYE_W,CHEEK,LIP)=range(38)
+PAL=[0xFF0B0B0C,0xFFEAEAF3,0xFFC9C9D6,0xFF8F8FA0,0xFF6E6E7E,0xFF34343E,0xFF42424E,0xFFB0B0C2,0xFF9494A8,0xFFF8F8FB,0xFFE0A981,0xFF3C3C48,0xFF2E2E38,0xFF9A9AA8,0xFFC6F432,0xFFFFFFFF,0xFFDCDCE6,0xFF6A6A78,0xFF7A7A8A,0xFF50505E,0xFF1C1C24,0xFF1B2230,0xFFE6E6F0,0xFFD6D6E2,0xFF5E5E6C,0xFFBE845F,0xFF8E8EA2,0xFFA2A2B6,0xFFABABBD,0xFFA6A6BC,0xFF585868,0xFFC9C9D8,0xFF76768C,0xFF4A2E22,0xFF7C5439,0xFFF6F2EE,0xFFD98672,0xFFA9524A]
 HALO=2.7
 
 class Prim:
@@ -72,6 +72,12 @@ def build(c,p):
     wx=lambda pt: c.worldX(pt.x)
     tx=sin(p.lean); ty=-cos(p.lean); cnx=cos(p.lean); cny=sin(p.lean)
     def body(a,b): return Pt(p.hip.x+tx*b+cnx*a, p.hip.y+ty*b+cny*a)
+    fem=bool(getattr(c,'female',False))
+    bw=0.9 if fem else 1.0
+    lk=0.94 if fem else 1.0
+    ak=0.92 if fem else 1.0
+    def wf(b): return bw*(1-0.11*math.exp(-((b-28)/10.0)**2)) if fem else 1.0
+    def tb(a,b): return body(a*wf(b),b)
     def circle(x,y,r,tone):
         out.append(Prim(0,INK,[x,y,r+HALO])); out.append(Prim(0,tone,[x,y,r]))
     def dot(x,y,r,tone): out.append(Prim(0,tone,[x,y,r]))
@@ -90,49 +96,63 @@ def build(c,p):
         out.append(Prim(2,INK,xy,width+HALO*1.7)); out.append(Prim(2,tone,xy,width))
     def ring(x,y,r,tone,width):
         pts=[]
-        for k in range(17):
-            a=2*pi*k/16; pts+=[x+r*cos(a),y+r*sin(a)]
+        for k in range(41):
+            a=2*pi*k/40; pts+=[x+r*cos(a),y+r*sin(a)]
         out.append(Prim(2,INK,pts,width+2.2)); out.append(Prim(2,tone,pts,width))
     def blob(pts,tone,halo=HALO):
         sm=smooth_closed(pts,4)
         if halo>0: out.append(Prim(1,INK,offset_poly(sm,halo)))
         out.append(Prim(1,tone,sm))
     LX=c.dir*0.40; LY=-0.92
-    def form(ax,ay,ra,bx,by,rb,shade,hi=None,t0=0.0,t1=1.0):
-        """Shade along the side of a limb that faces away from the light, and a thin highlight on the lit side."""
+    def crescent(ax,ay,ra,bx,by,rb,tone,depth=0.5,t0=0.0,t1=1.0,lit=False,n=12):
+        """Shading that hugs one edge of a limb: widest in the middle, tapering to nothing at both ends, so it
+        follows the outline instead of lying over the limb like a stripe. lit=False: the side away from the light."""
         dx=bx-ax; dy=by-ay; ln=hypot(dx,dy)
         if ln<1e-3: return
         nx=-dy/ln; ny=dx/ln
-        if nx*LX+ny*LY>0: nx=-nx; ny=-ny           # n points away from the light
-        def P(t,r,k):                               # point at fraction t along the limb, k of the radius out on the shade side
-            return (ax+dx*t+nx*r*k, ay+dy*t+ny*r*k)
-        # a round-capped stroke on the shade side (soft ends, always inside the limb's outline)
-        u0=t0+(t1-t0)*0.10; u1=t0+(t1-t0)*0.90
-        rr0=ra+(rb-ra)*u0; rr1=ra+(rb-ra)*u1; rm=(rr0+rr1)/2
-        w=rm*0.62; off=rm*0.64
-        o0=(ax+dx*u0+nx*off*rr0/rm, ay+dy*u0+ny*off*rr0/rm); o1=(ax+dx*u1+nx*off*rr1/rm, ay+dy*u1+ny*off*rr1/rm)
-        out.append(Prim(2,shade,[o0[0],o0[1],o1[0],o1[1]],w))
-        if hi is not None:
-            u0=t0+(t1-t0)*0.12; u1=t0+(t1-t0)*0.88
-            ra_=ra+(rb-ra)*u0; rb_=ra+(rb-ra)*u1
-            h=[(ax+dx*u0-nx*ra_*0.80, ay+dy*u0-ny*ra_*0.80),(ax+dx*u1-nx*rb_*0.80, ay+dy*u1-ny*rb_*0.80)]
-            out.append(Prim(2,hi,[v for pt in h for v in pt],1.7))
+        if (nx*LX+ny*LY>0)!=lit: nx=-nx; ny=-ny
+        outer=[]; inner=[]
+        for i in range(n+1):
+            u=i/n; t=t0+(t1-t0)*u; r=ra+(rb-ra)*t
+            w=sin(pi*u)**0.8; d=depth*r*w
+            cx=ax+dx*t; cy=ay+dy*t
+            outer.append((cx+nx*r*0.995,cy+ny*r*0.995)); inner.append((cx+nx*(r*0.995-d),cy+ny*(r*0.995-d)))
+        out.append(Prim(1,tone,[v for q in outer+inner[::-1] for v in q]))
+    def wrap_band(ax,ay,ra,bx,by,rb,t,width,tone,bow=0.22,n=9):
+        """A band that goes right round a limb (edge to edge, its edges curved the way a cylinder is seen)."""
+        dx=bx-ax; dy=by-ay; ln=hypot(dx,dy)
+        if ln<1e-3: return
+        ux=dx/ln; uy=dy/ln; nx=-uy; ny=ux; half=width/2/ln
+        top=[]; bot=[]
+        for k in range(n+1):
+            sv=-1+2*k/n
+            for tt,lst in ((t-half,top),(t+half,bot)):
+                r=ra+(rb-ra)*tt; bulge=bow*r*(1-sv*sv)
+                lst.append((ax+dx*tt+nx*r*sv*0.995+ux*bulge, ay+dy*tt+ny*r*sv*0.995+uy*bulge))
+        out.append(Prim(1,tone,[v for q in top+bot[::-1] for v in q]))
+    def ellipse(cx,cy,rx,ry,angx,angy,tone,n=24):
+        """An oval patch whose long axis (ry) points along (angx, angy)."""
+        l=max(hypot(angx,angy),1e-3); ux=angx/l; uy=angy/l; vx_=-uy; vy_=ux; pts=[]
+        for k in range(n):
+            a_=2*pi*k/n; ex_=rx*cos(a_); ey_=ry*sin(a_)
+            pts+=[cx+vx_*ex_+ux*ey_, cy+vy_*ex_+uy*ey_]
+        out.append(Prim(1,tone,pts))
     def limb(a,ra,b,rb,tone): taper(wx(a),a.y,ra,wx(b),b.y,rb,tone)
-    def limb_form(a,ra,b,rb,shade,hi=None,t0=0.0,t1=1.0): form(wx(a),a.y,ra,wx(b),b.y,rb,shade,hi,t0,t1)
+    def limb_form(a,ra,b,rb,shade,hi=None,t0=0.0,t1=1.0):
+        crescent(wx(a),a.y,ra,wx(b),b.y,rb,shade,0.5,t0,t1)
+        if hi is not None: crescent(wx(a),a.y,ra,wx(b),b.y,rb,hi,0.2,t0,t1,lit=True)
 
     def leg(hipJ,knee,ankle,pitch,tone,shade,boot,near):
         hxw=wx(hipJ); kxw=wx(knee); axw=wx(ankle)
-        limb(hipJ,11.4,knee,8.6,tone); limb(knee,8.6,ankle,6.2,tone)
+        limb(hipJ,11.4*lk,knee,8.6*lk,tone); limb(knee,8.6*lk,ankle,6.2*lk,tone)
         cx=kxw+(axw-kxw)*0.30; cy=knee.y+(ankle.y-knee.y)*0.30
-        dot(cx,cy,8.0,tone)
+        dot(cx,cy,8.0*lk,tone)
         if near:
-            limb_form(hipJ,11.4,knee,8.6,PANTS_DEEP,PANTS_HI)
-            limb_form(knee,8.6,ankle,6.2,PANTS_DEEP,PANTS_HI,0.0,0.8)
-            tdx=kxw-hxw; tdy=knee.y-hipJ.y; tl=max(hypot(tdx,tdy),1e-3)
-            lx=hxw+tdx/tl*15; ly=hipJ.y+tdy/tl*15
-            stroke(GEAR,2.4,lx-tdy/tl*9.4,ly+tdx/tl*9.4,lx+tdy/tl*9.4,ly-tdx/tl*9.4)
+            limb_form(hipJ,11.4*lk,knee,8.6*lk,PANTS_DEEP,PANTS_HI)
+            limb_form(knee,8.6*lk,ankle,6.2*lk,PANTS_DEEP,PANTS_HI,0.0,0.8)
+            wrap_band(hxw,hipJ.y,11.4*lk,kxw,knee.y,8.6*lk,0.30,3.0,GEAR)
         mx=(hxw+axw)/2; my=(hipJ.y+ankle.y)/2; fx=kxw-mx; fy=knee.y-my; fl=max(hypot(fx,fy),1e-3)
-        dot(kxw+fx/fl*3.0,knee.y+fy/fl*3.0,4.2,shade)
+        ellipse(kxw+fx/fl*3.0,knee.y+fy/fl*3.0,4.4,6.0,axw-hxw,ankle.y-hipJ.y,shade)
         dx=kxw-axw; dy=knee.y-ankle.y; l=max(hypot(dx,dy),1e-3)
         gx=axw+dx/l*15; gy=ankle.y+dy/l*15
         taper(axw,ankle.y,6.8,gx,gy,6.6,GAITER)
@@ -154,18 +174,13 @@ def build(c,p):
 
     def arm(shoulder,elbow,handPt,grip,tone,shade,glove):
         sx=wx(shoulder); ex=wx(elbow); hx=wx(handPt)
-        limb(shoulder,8.4,elbow,7.0,tone); limb(elbow,7.0,handPt,5.6,tone)
+        limb(shoulder,8.4*ak,elbow,7.0*ak,tone); limb(elbow,7.0*ak,handPt,5.6*ak,tone)
         if shade==SLEEVE_SHADE:
-            limb_form(shoulder,8.4,elbow,7.0,JACKET_DEEP,SHINE)
-            bx_=sx+(ex-sx)*0.46; by_=shoulder.y+(elbow.y-shoulder.y)*0.46
-            ux=ex-sx; uy=elbow.y-shoulder.y; ul=max(hypot(ux,uy),1e-3); px_=-uy/ul; py_=ux/ul
-            stroke(ACCENT,3.4,bx_-px_*7.0,by_-py_*7.0,bx_+px_*7.0,by_+py_*7.0)
-            limb_form(elbow,7.0,handPt,5.6,JACKET_DEEP,SHINE,0.0,0.85)
-        mx=(sx+hx)/2; my=(shoulder.y+handPt.y)/2; ix=mx-ex; iy=my-elbow.y; il=hypot(ix,iy)
-        if 3<il<48: stroke(INK,1.5,ex+ix/il*1.5,elbow.y+iy/il*1.5,ex+ix/il*6.4,elbow.y+iy/il*6.4)
-        fdx=hx-ex; fdy=handPt.y-elbow.y; fl=max(hypot(fdx,fdy),1e-3)
-        cx=ex+fdx*0.80; cy=elbow.y+fdy*0.80
-        stroke(GEAR,2.8,cx-fdy/fl*5.2,cy+fdx/fl*5.2,cx+fdy/fl*5.2,cy-fdx/fl*5.2)
+            limb_form(shoulder,8.4*ak,elbow,7.0*ak,JACKET_DEEP,SHINE)
+            limb_form(elbow,7.0*ak,handPt,5.6*ak,JACKET_DEEP,SHINE,0.0,0.85)
+            wrap_band(sx,shoulder.y,8.4*ak,ex,elbow.y,7.0*ak,0.46,3.4,ACCENT)
+        fdx=hx-ex; fdy=handPt.y-elbow.y
+        wrap_band(ex,elbow.y,7.0*ak,hx,handPt.y,5.6*ak,0.80,2.8,GEAR,0.18)
         hand(handPt,fdx,fdy,grip,glove)
 
     arm(p.shoulderB,p.elbowB,p.handB,p.gripB,JACKET_FAR,JACKET_FAR,GLOVE)
@@ -182,30 +197,38 @@ def build(c,p):
     lp=[rpw(4,44),rpw(14,41),rpw(27,43),rpw(25,54),rpw(14,58),rpw(5,53)]
     blob([v for q in lp for v in q],PACK_LID,1.6)
     kp=[rpw(23,14),rpw(31,16),rpw(31,30),rpw(24,31),rpw(21,22)]
-    blob([v for q in kp for v in q],PACK_SHADE,1.2)
-    dp=[rpw(5,11),rpw(18,9),rpw(28,15),rpw(29,24),rpw(14,22),rpw(4,24)]
-    out.append(Prim(1,PACK_DEEP,[v for q in dp for v in q]))
-    sh_=[rpw(5,38),rpw(26,40),rpw(27,44),rpw(5,43)]
-    out.append(Prim(1,PACK_DEEP,[v for q in sh_ for v in q]))
+    blob([v for q in kp for v in q],PACK_SHADE,0)
+    dp=[rpw(7,12.5),rpw(18,10.5),rpw(26.5,15.5),rpw(27,23),rpw(14,21),rpw(6,23)]
+    blob([v for q in dp for v in q],PACK_DEEP,0)
     s1=rpw(29,38); s2=rpw(4,38); stroke(GEAR,2.4,s1[0],s1[1],s2[0],s2[1])
     roll=rp(19,64); circle(wx(roll),roll.y,8.5,ROLL); ring(wx(roll),roll.y,4.2,PACK_SHADE,1.4)
     coil=rp(21,28); ring(wx(coil),coil.y,8.5,ROPE,2.6); ring(wx(coil),coil.y,5.2,ROPE,2.2)
 
     h=body(-13,62); circle(wx(h),h.y,8.2,HOOD); h2_=body(-8,69); dot(wx(h2_),h2_.y,4.2,HOOD)
 
-    tp=[body(12.4,-3),body(13.6,12),body(12.2,28),body(14.8,46),body(13.2,60),body(0,66),body(-12.4,60),body(-13.6,46),body(-11.6,28),body(-12.8,12),body(-12.2,-3),body(0,-6)]
+    tp=[tb(12.4,-3),tb(13.6,12),tb(12.2,28),tb(14.8,46),tb(13.2,60),tb(0,66),tb(-12.4,60),tb(-13.6,46),tb(-11.6,28),tb(-12.8,12),tb(-12.2,-3),tb(0,-6)]
     blob([v for q in tp for v in ((wx(q),q.y))],JACKET)
-    # the half of the jacket away from the slope, in shade; a deeper zone along the hem (light comes from above)
-    a=body(-8.6,6); b=body(-9.2,56)
-    stroke(JACKET_DEEP,6.0,wx(a),a.y,wx(b),b.y)
-    hz=[body(-12.2,-2),body(12.4,-2),body(13.2,13),body(6,17),body(-3,15),body(-12.6,14)]
-    out.append(Prim(1,JACKET_DEEP,[v for q in hz for v in (wx(q),q.y)]))
+    # shade that hugs the back edge of the jacket (away from the slope) and a rounded zone along the hem
+    ey=[-3.0,12.0,28.0,46.0,60.0]; ex_=[-12.2,-12.8,-11.6,-13.6,-12.4]
+    def back_edge(y):
+        for i in range(len(ey)-1):
+            if ey[i]<=y<=ey[i+1]:
+                k=(y-ey[i])/(ey[i+1]-ey[i]); return ex_[i]+(ex_[i+1]-ex_[i])*k
+        return ex_[-1]
+    ys=[6+50*i/10 for i in range(11)]
+    outer=[tb(back_edge(y)+1.0,y) for y in ys]
+    inner=[tb(back_edge(y)+1.0+5.4*sin(pi*i/10)**0.8,y) for i,y in enumerate(ys)]
+    blob([v for q in outer+inner[::-1][1:-1] for v in (wx(q),q.y)],JACKET_DEEP,0)
+    hz=[tb(-11.2,-1.0),tb(11.4,-1.0),tb(12.8,7.0),tb(8,12.5),tb(0,13.8),tb(-8,12.5),tb(-12.3,7.0)]
+    blob([v for q in hz for v in (wx(q),q.y)],JACKET_DEEP,0)
+    # baffles: curved across the body, not touching the edges
     for bb in (22.0,36.0,50.0):
-        q1=body(-12.0,bb); q2=body(12.6,bb); stroke(JACKET_DEEP,1.5,wx(q1),q1.y,wx(q2),q2.y)
-    z1=body(10,8); z2=body(12.5,58); stroke(ACCENT,2.4,wx(z1),z1.y,wx(z2),z2.y)
-    h1_=body(-5,63.5); h2__=body(9,62.5); stroke(SHINE,2.0,wx(h1_),h1_.y,wx(h2__),h2__.y)
-    c1=body(8.0,40); c2=body(9.4,54); stroke(SHINE,1.6,wx(c1),c1.y,wx(c2),c2.y)
-    m1=body(-12.6,-1); m2=body(12.8,-1); stroke(GEAR,3.6,wx(m1),m1.y,wx(m2),m2.y)
+        pts=[]
+        for k in range(9):
+            sv=-1+2*k/8; q=tb(-11.2+22.4*k/8, bb-1.8*(1-sv*sv)); pts+=[wx(q),q.y]
+        stroke(JACKET_DEEP,1.2,*pts)
+    z1=tb(10,8); z2=tb(12.5,58); stroke(ACCENT,2.4,wx(z1),z1.y,wx(z2),z2.y)
+    m1=tb(-12.6,-1); m2=tb(12.8,-1); stroke(GEAR,3.6,wx(m1),m1.y,wx(m2),m2.y)
 
     bb1=Pt(p.hip.x+tx*6-cnx*13,p.hip.y+ty*6-cny*13); bb2=Pt(p.hip.x+tx*6+cnx*13,p.hip.y+ty*6+cny*13)
     stroke(GEAR,5.5,wx(bb1),bb1.y,wx(bb2),bb2.y)
@@ -233,16 +256,53 @@ def build(c,p):
     def hp(a,b): return (hx+fx*a+vx*b, hy+fy*a+vy*b)
     # ---- Face: a profile with a nose, a jaw and a cheek in shade ----
     circle(hx,hy,HEAD_R-0.5,FACE)
-    n_=hp(HEAD_R-0.6,-4.6); circle(n_[0],n_[1],2.4,FACE)
-    ch=hp(7.0,-10.2); circle(ch[0],ch[1],4.6,FACE)
-    ck=hp(3.5,-7.5); dot(ck[0],ck[1],3.4,FACE_SHADE)
-    m0=hp(9,-9.4); m1=hp(12,-9.4); stroke(INK,1.1,m0[0],m0[1],m1[0],m1[1])
+    n_=hp(HEAD_R-0.3,-6.1); circle(n_[0],n_[1],1.8 if fem else 2.1,FACE)
+    ch=hp(6.0,-10.0); circle(ch[0],ch[1],3.4,FACE)
+    ck=hp(3.0,-7.5); dot(ck[0],ck[1],3.4,FACE_SHADE)
+    bl=hp(7.0,-5.6); dot(bl[0],bl[1],2.5,CHEEK)
+    # a small smile
+    m0=hp(4.8,-10.4); m1=hp(6.8,-10.8); m2=hp(8.4,-10.2)
+    stroke(LIP,1.5 if fem else 1.1,m0[0],m0[1],m1[0],m1[1],m2[0],m2[1])
     # chin strap, from under the shell to the jaw
-    c0=hp(-1.5,1.5); c1=hp(1.5,-9.0); c2=hp(8,-11.5)
-    stroke(GEAR,1.8,c0[0],c0[1],c1[0],c1[1],c2[0],c2[1])
+    c0=hp(-1.5,1.5); c1=hp(1.5,-9.0); c2=hp(7,-12.0)
+    stroke(GEAR,1.1,c0[0],c0[1],c1[0],c1[1],c2[0],c2[1])
+    if fem:
+        # a ponytail out of the back of the helmet: tapers, droops, and swings with the stride
+        ph=p.clock*6.3+0.8
+        cen=[hp(-13.0,3.0)]
+        for i in range(1,7):
+            cen.append(hp(-13.0-4.4*i, 5.0+1.2*i-0.55*i*i+sin(ph-i*0.8)*(0.5+0.9*i)))
+        rad=[3.9,4.4,4.4,4.0,3.3,2.4,1.2]
+        for i in range(6):
+            a=cen[i]; b=cen[i+1]
+            ln=max(hypot(b[0]-a[0],b[1]-a[1]),1e-3); nx=-(b[1]-a[1])/ln; ny=(b[0]-a[0])/ln
+            ra=rad[i]+HALO; rb=rad[i+1]+HALO
+            out.append(Prim(1,INK,[a[0]+nx*ra,a[1]+ny*ra,b[0]+nx*rb,b[1]+ny*rb,b[0]-nx*rb,b[1]-ny*rb,a[0]-nx*ra,a[1]-ny*ra]))
+        for i in range(7): out.append(Prim(0,INK,[cen[i][0],cen[i][1],rad[i]+HALO]))
+        for i in range(6):
+            a=cen[i]; b=cen[i+1]
+            ln=max(hypot(b[0]-a[0],b[1]-a[1]),1e-3); nx=-(b[1]-a[1])/ln; ny=(b[0]-a[0])/ln
+            ra=rad[i]; rb=rad[i+1]
+            out.append(Prim(1,HAIR,[a[0]+nx*ra,a[1]+ny*ra,b[0]+nx*rb,b[1]+ny*rb,b[0]-nx*rb,b[1]-ny*rb,a[0]-nx*ra,a[1]-ny*ra]))
+        for i in range(7): out.append(Prim(0,HAIR,[cen[i][0],cen[i][1],rad[i]]))
+        # a lit strand along the upper side, and the lime tie where it leaves the helmet
+        up_=[(cen[i][0]+vx*rad[i]*0.45, cen[i][1]+vy*rad[i]*0.45) for i in range(1,5)]
+        stroke(HAIR_HI,1.1,*[v for q in up_ for v in q])
+        out.append(Prim(0,ACCENT,[cen[1][0],cen[1][1],2.0]))
     # the shadow the helmet throws on the brow
-    f0=hp(14,2.4); f1=hp(0,-0.6); f2=hp(-10,-6.5)
-    stroke(FACE_SHADE,6.0,f0[0],f0[1],f1[0],f1[1],f2[0],f2[1])
+    E=[(15.0,3.0),(8.0,2.6),(0.0,1.1),(-8.0,-2.4),(-12.5,-6.8)]
+    top_=[hp(x_,y_+1.6) for x_,y_ in E]
+    bot_=[hp(x_,y_-1.9*sin(pi*i/(len(E)-1))**0.7) for i,(x_,y_) in enumerate(E)]
+    blob([v for q in top_+bot_[::-1][1:-1] for v in q],FACE_SHADE,0)
+    # ---- An eye and a brow, looking up the slope ----
+    ey_=hp(8.8,-2.6)
+    dot(ey_[0],ey_[1],2.4,INK); dot(ey_[0],ey_[1],1.75,EYE_W)
+    ir=hp(9.3,-2.6); dot(ir[0],ir[1],1.2,INK)
+    gl_=hp(9.6,-2.1); dot(gl_[0],gl_[1],0.45,SHINE)
+    bw_=[hp(5.8,-0.2),hp(8.6,0.6),hp(11.2,0.0)]
+    stroke(HAIR if fem else INK,1.3,*[v for q in bw_ for v in q])
+    if fem:
+        la=hp(10.2,-1.3); lb=hp(12.2,-0.5); stroke(INK,0.9,la[0],la[1],lb[0],lb[1])
     # ---- Helmet: a rounded shell that wraps the back of the head, with a brim built into the front ----
     hl=[hp(-14.2,-9),hp(-16,0),hp(-14,8.5),hp(-8,14.2),hp(0,16.4),hp(8,14.8),hp(13.8,10.2),hp(19,6.8),hp(18,4.2),hp(8,3.0),hp(0,1.5),hp(-8,-2),hp(-12.5,-7)]
     blob([v for q in hl for v in q],HELMET)
@@ -253,18 +313,13 @@ def build(c,p):
     # a lime rim just inside the lower edge
     rm=[hp(15.5,5.6),hp(8,5.2),hp(0,3.6),hp(-8,0.4),hp(-13,-5.2)]
     stroke(ACCENT,1.9,*[v for q in rm for v in q])
-    # vents on the crown
-    for ang in (-50.0,-18.0,14.0):
-        a=math.radians(ang); ax=vx*cos(a)+fx*sin(a); ay=vy*cos(a)+fy*sin(a)
-        stroke(JACKET_SHADE,1.5,hx+ax*(HEAD_R-1.4),hy+ay*(HEAD_R-1.4),hx+ax*(HEAD_R+1.4),hy+ay*(HEAD_R+1.4))
-    # ---- Goggles: a strap round the head, and a lens that sits on the eyes ----
-    s0=hp(7,-0.8); s1=hp(-3,-1.4); s2=hp(-12.4,-4.6)
-    stroke(GOGGLE,2.6,s0[0],s0[1],s1[0],s1[1],s2[0],s2[1])
-    g1=hp(10.5,1.8); g2=hp(10.5,-2.8)
-    inked(GOGGLE,7.4,g1[0],g1[1],g2[0],g2[1]); stroke(LENS,5.2,g1[0],g1[1],g2[0],g2[1])
-    l0=hp(12.2,1.1); l1=hp(12.2,-1.4); stroke(ACCENT,1.4,l0[0],l0[1],l1[0],l1[1])
-    gl=hp(11.4,2.2); dot(gl[0],gl[1],1.2,SHINE)
-    hi=hp(4,12.2); dot(hi[0],hi[1],2.4,SHINE)
+    # ---- Goggles pushed up onto the helmet: a strap round the shell and a lens resting on the front ----
+    sp=[hp(10.5,6.4),hp(1,5.2),hp(-7,2.6),hp(-13.2,-1.6)]
+    stroke(GOGGLE,2.2,*[v for q in sp for v in q])
+    g1=hp(9.0,7.8); g2=hp(2.5,9.0)
+    inked(GOGGLE,6.4,g1[0],g1[1],g2[0],g2[1]); stroke(LENS,4.2,g1[0],g1[1],g2[0],g2[1])
+    l0=hp(7.6,8.6); l1=hp(3.8,9.4); stroke(SHINE,1.0,l0[0],l0[1],l1[0],l1[1])
+    hi=hp(-4,12.8); dot(hi[0],hi[1],2.4,SHINE)
 
     ex=wx(p.elbowA); ey=p.elbowA.y; hx2=wx(p.handA); hy2=p.handA.y
     ln=max(hypot(hx2-ex,hy2-ey),1e-3); dx=(hx2-ex)/ln; dy=(hy2-ey)/ln

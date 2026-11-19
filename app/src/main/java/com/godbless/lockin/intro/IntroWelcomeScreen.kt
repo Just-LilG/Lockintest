@@ -165,7 +165,7 @@ fun IntroWelcomeScreen(
     val wordmark = remember(measurer) { Wordmark(measurer, wordStyle) }
     val left = remember { ClimberSpec(135f, 1f, 5, 290f, Timeline.WALK_START, Timeline.WALK_DUR) }
     val right = remember {
-        ClimberSpec(1115f, -1f, 5, 971f, Timeline.WALK_START + Timeline.WALK_LAG_RIGHT, Timeline.WALK_DUR)
+        ClimberSpec(1115f, -1f, 5, 971f, Timeline.WALK_START + Timeline.WALK_LAG_RIGHT, Timeline.WALK_DUR, female = true)
     }
     val topInset = WindowInsets.statusBars.getTop(density).toFloat()
     val bottomInset = WindowInsets.navigationBars.getBottom(density).toFloat()

@@ -38,6 +38,9 @@ export function cleanMathText(v: unknown, max: number): string {
     // never cut inside a $…$ (an open formula would swallow the rest of the screen)
     const dollars = (s.match(/(?<!\\)\$/g) ?? []).length;
     if (dollars % 2 === 1) s = s.slice(0, s.lastIndexOf("$")).trim();
+    // nor inside a fenced block (a plot or diagram cut short would show as raw text)
+    const fences = (s.match(/```/g) ?? []).length;
+    if (fences % 2 === 1) s = s.slice(0, s.lastIndexOf("```")).trim();
   }
   return s;
 }

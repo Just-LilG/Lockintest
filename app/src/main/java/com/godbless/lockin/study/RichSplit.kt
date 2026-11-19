@@ -9,14 +9,32 @@ package com.godbless.lockin.study
  */
 
 internal sealed class Span {
-    class Txt(val text: String, val bold: Boolean = false, val italic: Boolean = false, val code: Boolean = false) : Span()
-    class Math(val tex: String) : Span()
+    /** [color] is a [tintIndex] (0 = the normal text colour); [mark] is the highlighter. */
+    class Txt(
+        val text: String,
+        val bold: Boolean = false,
+        val italic: Boolean = false,
+        val code: Boolean = false,
+        val color: Int = 0,
+        val mark: Boolean = false,
+    ) : Span()
+    class Math(val tex: String, val color: Int = 0) : Span()
 }
 
 internal sealed class Block {
     /** One line of an answer. [marker] is "•" or "1." for a list item; [gapBefore] when a blank line came before it. */
     class Para(val spans: List<Span>, val marker: String?, val gapBefore: Boolean) : Block()
     class Display(val tex: String) : Block()
+    class Heading(val level: Int, val spans: List<Span>) : Block()
+    /** [aligns] has one of 'l', 'c', 'r' per column; every row has exactly as many cells as the header. */
+    class Table(val header: List<List<Span>>, val rows: List<List<List<Span>>>, val aligns: List<Char>) : Block()
+    /** [kind]: tip, warning, remember, example, note, careful or key idea. */
+    class Callout(val kind: String, val body: List<Block>) : Block()
+    class Quote(val body: List<Block>) : Block()
+    class Code(val text: String, val lang: String) : Block()
+    object Rule : Block()
+    class Plot(val spec: PlotSpec) : Block()
+    class Diagram(val spec: DiagramSpec) : Block()
 }
 
 internal object RichSplit {
@@ -211,10 +229,10 @@ internal object RichSplit {
         val t = text.trim()
         if (t.isEmpty() || t.length > 200) return false
         if (t.indexOf(DOLLAR) >= 0 || t.indexOf('\\') >= 0) return true
-        val words = Regex("[A-Za-z]{4,}").findAll(t).map { it.value }.toList()
+        val words = FOUR_LETTERS.findAll(t).map { it.value }.toList()
         val known = words.filter { it.lowercase() in GREEK_WORDS || it.lowercase() in setOf("sqrt", "sin", "cos", "tan", "log") }
         if (words.size - known.size > 0) return false
-        val hasOp = Regex("[=+\\-*/^<>]").containsMatchIn(t)
+        val hasOp = OPERATOR.containsMatchIn(t)
         val hasSymbol = hasOp || t.contains("sqrt") || t.any { it.isDigit() } || t.contains('_')
         return hasSymbol && t.any { it.isLetterOrDigit() } && (!t.contains(' ') || hasOp)
     }
@@ -226,32 +244,45 @@ internal object RichSplit {
         return toTex(t)
     }
 
-    // ---- inline and blocks
+    // ---- inline
+    private val COLOR_NAMES = listOf("lime", "flare", "sky", "amber", "mist", "green", "red", "blue", "orange", "yellow", "gray", "grey")
+
     fun inline(line: String): List<Span> {
         val out = ArrayList<Span>()
         val buf = StringBuilder()
         var bold = false
         var ital = false
+        var mark = false
+        val colors = ArrayList<Int>()
+        fun color() = if (colors.isEmpty()) 0 else colors[colors.size - 1]
         fun flush() {
             if (buf.isEmpty()) return
             val s = buf.toString()
             buf.setLength(0)
-            for ((isMath, piece) in upgrade(s)) out.add(if (isMath) Span.Math(piece) else Span.Txt(piece, bold, ital))
+            for ((isMath, piece) in upgrade(s)) out.add(if (isMath) Span.Math(piece, color()) else Span.Txt(piece, bold, ital, false, color(), mark))
         }
         var i = 0
         val n = line.length
         while (i < n) {
             val c = line[i]
-            if (c == '\\' && i + 1 < n && "$DOLLAR*`\\".indexOf(line[i + 1]) >= 0) { buf.append(line[i + 1]); i += 2; continue }
+            if (c == '\\' && i + 1 < n && "$DOLLAR*`\\{}=".indexOf(line[i + 1]) >= 0) { buf.append(line[i + 1]); i += 2; continue }
             if (c == DOLLAR) {
                 val j = findInlineClose(line, i)
-                if (j > 0) { flush(); out.add(Span.Math(line.substring(i + 1, j))); i = j + 1; continue }
+                if (j > 0) { flush(); out.add(Span.Math(line.substring(i + 1, j), color())); i = j + 1; continue }
             }
             if (c == '`') {
                 val j = line.indexOf('`', i + 1)
                 if (j > 0) { flush(); out.add(Span.Txt(line.substring(i + 1, j), code = true)); i = j + 1; continue }
             }
+            if (c == '{') {
+                val name = COLOR_NAMES.firstOrNull { line.startsWith("{" + it + "|", i) }
+                if (name != null) { flush(); colors.add(tintIndex(name)); i += name.length + 2; continue }
+            }
+            if (c == '}' && colors.isNotEmpty()) { flush(); colors.removeAt(colors.size - 1); i++; continue }
             if (line.startsWith("**", i)) { flush(); bold = !bold; i += 2; continue }
+            if (line.startsWith("==", i) && (mark || (i + 2 < n && !line[i + 2].isWhitespace())) && (mark || line.indexOf("==", i + 2) > 0)) {
+                flush(); mark = !mark; i += 2; continue
+            }
             if (c == '*') {
                 val nextNonSpace = i + 1 < n && !line[i + 1].isWhitespace()
                 val prevAlnum = i > 0 && line[i - 1].isLetterOrDigit()
@@ -266,11 +297,88 @@ internal object RichSplit {
         return out
     }
 
-    private fun lines(text: String): List<Block> {
+    // ---- blocks
+    private val FOUR_LETTERS = Regex("[A-Za-z]{4,}")
+    private val OPERATOR = Regex("[=+\\-*/^<>]")
+    private val SPACES = Regex("\\s+")
+    private val HEADING = Regex("""^\s{0,3}(#{1,3})\s+(.+?)\s*#*\s*$""")
+    private val RULE = Regex("""^\s*(?:-{3,}|\*{3,}|_{3,})\s*$""")
+    private val TABLE_SEP = Regex("""^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$""")
+    private val CALLOUT = Regex("""^(tip|warning|remember|example|note|careful|key idea)\s*[:：]\s*(.*)$""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    private val QUOTE_MARK = Regex("""^\s*>\s?""")
+
+    /** The cells of one table row; a "|" inside $..$ (like |x|) or escaped as \| is not a column break. */
+    fun splitCells(row0: String): List<String> {
+        var row = row0.trim()
+        if (row.startsWith("|")) row = row.substring(1)
+        if (row.endsWith("|") && !row.endsWith("\\|")) row = row.substring(0, row.length - 1)
+        val cells = ArrayList<String>()
+        val cur = StringBuilder()
+        var inMath = false
+        var i = 0
+        while (i < row.length) {
+            val c = row[i]
+            if (c == '\\' && i + 1 < row.length) {
+                if (row[i + 1] == '|') cur.append('|') else cur.append(c).append(row[i + 1])
+                i += 2
+                continue
+            }
+            if (c == DOLLAR) inMath = !inMath
+            if (c == '|' && !inMath) { cells.add(cur.toString().trim()); cur.setLength(0) } else cur.append(c)
+            i++
+        }
+        cells.add(cur.toString().trim())
+        return cells
+    }
+
+    private fun aligns(sep: String): List<Char> = splitCells(sep).map { c ->
+        val l = c.startsWith(":")
+        val r = c.endsWith(":")
+        if (l && r) 'c' else if (r) 'r' else 'l'
+    }
+
+    private fun fence(lang: String, body: String): Block {
+        when (lang) {
+            "plot" -> PlotSpec.parse(body)?.let { return Block.Plot(it) }
+            "flow", "cycle", "timeline" -> DiagramSpec.parse(lang, body)?.let { return Block.Diagram(it) }
+        }
+        return Block.Code(body, lang)
+    }
+
+    private fun paraLines(lines: List<String>): List<Block> {
         val out = ArrayList<Block>()
         var gap = false
-        for (raw in text.split('\n')) {
-            if (raw.isBlank()) { gap = true; continue }
+        var i = 0
+        while (i < lines.size) {
+            val raw = lines[i]
+            if (raw.isBlank()) { gap = true; i++; continue }
+            val s = raw.trim()
+            val h = HEADING.find(raw)
+            if (h != null) { out.add(Block.Heading(h.groupValues[1].length, inline(h.groupValues[2]))); gap = false; i++; continue }
+            if (RULE.matches(raw)) { out.add(Block.Rule); gap = false; i++; continue }
+            if (s.startsWith("|") && i + 1 < lines.size && TABLE_SEP.matches(lines[i + 1]) && lines[i + 1].contains('|')) {
+                val head = splitCells(s)
+                val al = aligns(lines[i + 1])
+                var j = i + 2
+                val rows = ArrayList<List<List<Span>>>()
+                while (j < lines.size && lines[j].trim().startsWith("|")) {
+                    val cells = splitCells(lines[j])
+                    rows.add(List(head.size) { k -> inline(if (k < cells.size) cells[k] else "") })
+                    j++
+                }
+                out.add(Block.Table(head.map { inline(it) }, rows, List(head.size) { k -> if (k < al.size) al[k] else 'l' }))
+                i = j; gap = false; continue
+            }
+            if (s.startsWith(">")) {
+                var j = i
+                val body = ArrayList<String>()
+                while (j < lines.size && lines[j].trim().startsWith(">")) { body.add(QUOTE_MARK.replace(lines[j], "")); j++ }
+                val inner = body.joinToString("\n")
+                val m = CALLOUT.find(inner.trim())
+                if (m != null) out.add(Block.Callout(m.groupValues[1].lowercase(), blocks(m.groupValues[2])))
+                else out.add(Block.Quote(blocks(inner)))
+                i = j; gap = false; continue
+            }
             val m = BULLET.find(raw)
             var marker: String? = null
             val body: String
@@ -281,25 +389,53 @@ internal object RichSplit {
             } else body = raw.trim()
             out.add(Block.Para(inline(body), marker, gap && out.isNotEmpty()))
             gap = false
+            i++
         }
+        return out
+    }
+
+    /** Ordinary text (no code fences): display equations first, then the line-by-line blocks. */
+    private fun textBlocks(t: String): List<Block> {
+        val out = ArrayList<Block>()
+        var pos = 0
+        for (m in DISPLAY_DOLLARS.findAll(t)) {
+            out.addAll(paraLines(t.substring(pos, m.range.first).split('\n')))
+            out.add(Block.Display(m.groupValues[1].trim()))
+            pos = m.range.last + 1
+        }
+        out.addAll(paraLines(t.substring(pos).split('\n')))
         return out
     }
 
     fun blocks(text: String): List<Block> {
-        val t = normalize(text.replace("\r", ""))
+        val lines = normalize(text.replace("\r", "")).split('\n')
         val out = ArrayList<Block>()
-        var pos = 0
-        for (m in DISPLAY_DOLLARS.findAll(t)) {
-            out.addAll(lines(t.substring(pos, m.range.first)))
-            out.add(Block.Display(m.groupValues[1].trim()))
-            pos = m.range.last + 1
+        val normal = StringBuilder()
+        fun flushNormal() {
+            if (normal.isNotEmpty()) { out.addAll(textBlocks(normal.toString())); normal.setLength(0) }
         }
-        out.addAll(lines(t.substring(pos)))
+        var i = 0
+        while (i < lines.size) {
+            val s = lines[i].trim()
+            if (s.startsWith("```")) {
+                flushNormal()
+                val lang = s.removePrefix("```").trim().lowercase().split(SPACES).first()
+                var j = i + 1
+                val body = ArrayList<String>()
+                while (j < lines.size && !lines[j].trim().startsWith("```")) { body.add(lines[j]); j++ }
+                out.add(fence(lang, body.joinToString("\n")))
+                i = j + 1
+                continue
+            }
+            normal.append(lines[i]).append('\n')
+            i++
+        }
+        flushNormal()
         return out
     }
 
-    /** True when [text] needs more than a plain Text: a formula, a display equation, a list or bold. */
+    /** True when [blocks] need more than a plain Text: anything but plain paragraphs (bold, italic and code are fine). */
     fun isRich(blocks: List<Block>): Boolean = blocks.any {
-        it is Block.Display || (it is Block.Para && (it.marker != null || it.spans.any { s -> s is Span.Math }))
+        it !is Block.Para || it.marker != null || it.spans.any { s -> s is Span.Math || (s is Span.Txt && (s.color != 0 || s.mark)) }
     }
 }

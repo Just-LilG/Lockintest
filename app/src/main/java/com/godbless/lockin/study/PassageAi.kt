@@ -346,6 +346,15 @@ internal fun PassageSheet(
         }
     }
 
+    // Tapping a piece of a formula in any answer asks about just that piece.
+    val explainPiece: (String) -> Unit = { tex ->
+        follow(
+            "Explain \$$tex\$",
+            "ask",
+            "Explain this part of the maths in one or two short sentences, and say what job it does in the whole formula: \$$tex\$",
+        )
+    }
+
     LaunchedEffect(args) {
         ai?.warm()
         if (args.ask) runCatching { focus.requestFocus() } else explain()
@@ -404,7 +413,7 @@ internal fun PassageSheet(
                 }
                 error != null -> ErrorBox(error!!) { explain() }
                 first != null && first!!.meaning.isNotBlank() -> {
-                    PassageResult(first!!)
+                    PassageResult(first!!, onExplain = explainPiece)
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SmallAction(if (carded) "Card added ✓" else "Make a flashcard", Glyph.Cards, enabled = !carded) {
@@ -438,7 +447,7 @@ internal fun PassageSheet(
                             follow(t.ask, t.mode, t.question)
                         }
                     }
-                    else -> PassageTurnView(t.ask, t.answer)
+                    else -> PassageTurnView(t.ask, t.answer, onExplain = explainPiece)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -554,21 +563,21 @@ private fun SelectionCard(picture: ImageBitmap, text: String?) {
 
 /** The first explanation of a selection: meaning, its place in the book, an example and the harder words. */
 @Composable
-internal fun PassageResult(p: AiPassage) {
+internal fun PassageResult(p: AiPassage, onExplain: ((String) -> Unit)? = null) {
     if (p.meaning.isNotBlank()) {
         SectionLabel("What it means")
-        MathText(p.meaning, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 24.sp))
+        MathText(p.meaning, style = LockInText.Sub.copy(color = LockInColors.Snow, fontSize = 16.sp, lineHeight = 24.sp), onExplain = onExplain)
     }
     if (p.context.isNotBlank()) {
         Spacer(Modifier.height(16.dp))
         SectionLabel("Here in the book")
-        MathText(p.context, style = LockInText.Sub.copy(color = LockInColors.Body, lineHeight = 22.sp))
+        MathText(p.context, style = LockInText.Sub.copy(color = LockInColors.Body, lineHeight = 22.sp), onExplain = onExplain)
     }
     if (p.example.isNotBlank()) {
         Spacer(Modifier.height(16.dp))
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(LockInColors.Graphite).padding(14.dp)) {
             SectionLabel("For example")
-            MathText(p.example, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 22.sp))
+            MathText(p.example, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 22.sp), onExplain = onExplain)
         }
     }
     if (p.terms.isNotEmpty()) {
@@ -589,11 +598,12 @@ internal fun PassageResult(p: AiPassage) {
 
 /** One follow-up: what you asked, on the right like a message you sent, and the answer under it. Null answer: still thinking. */
 @Composable
-internal fun PassageTurnView(ask: String, answer: String?) {
+internal fun PassageTurnView(ask: String, answer: String?, onExplain: ((String) -> Unit)? = null) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Text(
+        MathText(
             ask,
             style = LockInText.Label.copy(color = LockInColors.OnLime, fontSize = 14.sp),
+            color = LockInColors.OnLime,
             modifier = Modifier
                 .padding(start = 48.dp)
                 .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 6.dp))
@@ -605,7 +615,7 @@ internal fun PassageTurnView(ask: String, answer: String?) {
     if (answer == null) {
         Dots()
     } else {
-        MathText(answer, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 23.sp))
+        MathText(answer, style = LockInText.Sub.copy(color = LockInColors.Snow, lineHeight = 23.sp), onExplain = onExplain)
     }
 }
 

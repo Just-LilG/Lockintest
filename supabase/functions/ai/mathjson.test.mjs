@@ -26,6 +26,10 @@ assert.equal(unmangleMath(damaged), String.raw`$\frac{a}{b} \theta \beta \right$
 // 9. clipping never leaves a formula open
 assert.equal(cleanMathText("Use $x^2 + 1$ and $y^2 + 2$ now", 22), "Use $x^2 + 1$ and");
 assert.equal(cleanMathText("Costs \\$5 and \\$6", 100), "Costs \\$5 and \\$6");
+// 9b. clipping never leaves a code fence open; \textcolor (a \t escape lookalike) survives the repair
+assert.equal(cleanMathText("Intro\n```plot\ny = x^2\nx: -1..1\n```\nmore text here", 30), "Intro");
+assert.equal(cleanMathText("Intro\n```plot\ny = x^2\n```", 100), "Intro\n```plot\ny = x^2\n```");
+assert.equal(parse(String.raw`{"a":"$\textcolor{lime}{a}\times b$"}`).a, String.raw`$\textcolor{lime}{a}\times b$`);
 // 10. fuzz with well-formed pieces only (no bare quotes, no trailing lone backslash)
 const pieces = ["\\\\", '\\"', "\\f", "\\t", "\\n", "\\u", "\\u12", "\\u00e9", "\\x", "\\(", "\\$", "a", "n", " ", "{", "}", "$", "frac", "theta", "\\\\n"];
 let valid = 0, repaired = 0;
