@@ -38,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
@@ -84,11 +85,12 @@ internal enum class CalcPage { Comp, Stat, Matrix, Vector, Distr, Base, Eqn, Tab
 @Composable
 internal fun CalcPill(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, on: Boolean = false, accent: Color = CC.Violet, enabled: Boolean = true) {
     val shape = RoundedCornerShape(14.dp)
+    val base = if (on) accent else CC.Raised
     Box(
         modifier
             .clip(shape)
-            .background(if (on) accent else CC.Raised)
-            .border(1.dp, if (on) accent else CC.Line, shape)
+            .background(Brush.verticalGradient(listOf(lighter(base, if (on) 0.18f else 0.07f), base, darker(base, if (on) 0.10f else 0.18f))))
+            .border(1.dp, Brush.verticalGradient(listOf(Color.White.copy(alpha = if (on) 0.45f else 0.14f), Color.Black.copy(alpha = 0.35f))), shape)
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center,
@@ -354,9 +356,10 @@ internal fun HistorySheet(
 // ---- Settings ---------------------------------------------------------------------------------
 
 @Composable
-internal fun SettingsSheet(visible: Boolean, model: CalcModel, version: Int, onChange: () -> Unit, onClose: () -> Unit) {
+internal fun SettingsSheet(visible: Boolean, model: CalcModel, tick: () -> Int, onChange: () -> Unit, onClose: () -> Unit) {
+    // Reading the tick makes this redraw when a setting changes, but only while it is open.
+    val version = if (visible) tick() else 0
     CalcOverlay(visible, "Settings", onClose) {
-        // `version` makes this redraw each time something changes.
         if (version < 0) return@CalcOverlay
         CalcSectionTitle("Angle unit")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -400,6 +403,11 @@ internal fun SettingsSheet(visible: Boolean, model: CalcModel, version: Int, onC
             CalcPill("Haptics on", { model.haptics = true; onChange() }, Modifier.weight(1f), on = model.haptics)
             CalcPill("Haptics off", { model.haptics = false; onChange() }, Modifier.weight(1f), on = !model.haptics)
         }
+        CalcSectionTitle("Speed readout")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CalcPill("Show on screen", { model.showSpeed = true; onChange() }, Modifier.weight(1f), on = model.showSpeed)
+            CalcPill("Hide", { model.showSpeed = false; onChange() }, Modifier.weight(1f), on = !model.showSpeed)
+        }
         CalcSectionTitle("Screen")
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             LcdThemes.forEachIndexed { i, t ->
@@ -418,10 +426,10 @@ internal val FuncList = listOf(
     FuncInfo("Trigonometry", "Sin⁻¹  Cos⁻¹  Tan⁻¹", "asin(", "The angle that has a given sine, cosine or tangent.", "asin(0.5) = 30"),
     FuncInfo("Trigonometry", "Cot  Cot⁻¹", "cot(", "Cotangent, and its inverse (ALPHA + the ( key).", "cot(45) = 1"),
     FuncInfo("Trigonometry", "sinh  cosh  tanh", "sinh(", "Hyperbolic functions. Press hyp first, then the trig key.", "sinh(1) = 1.1752"),
-    FuncInfo("Powers and logs", "√  ∛  ˣ√", "√(", "Square root, cube root, and the y-th root (3ˣ√8 = 2).", "√(18) = 3√2"),
-    FuncInfo("Powers and logs", "x²  x³  xʸ  x⁻¹", "^", "Powers and the reciprocal.", "2^10 = 1024"),
-    FuncInfo("Powers and logs", "log  ln  logₓy", "logb(", "Log base 10, natural log, and log to any base: logₓy(base, number).", "logb(2,8) = 3"),
-    FuncInfo("Powers and logs", "10ˣ  eˣ", "10^(", "Powers of ten and e (SHIFT + Log, SHIFT + Ln).", "10^(3) = 1000"),
+    FuncInfo("Powers and logs", "√  ∛  ˣ√", "√(¦)", "Square root, cube root, and the y-th root (3ˣ√8 = 2).", "√(18) = 3√2"),
+    FuncInfo("Powers and logs", "x²  x³  xʸ  x⁻¹", "^(¦)", "Powers and the reciprocal.", "2^10 = 1024"),
+    FuncInfo("Powers and logs", "log  ln  logₓy", "logb(¦,)", "Log base 10, natural log, and log to any base: logₓy(base, number).", "logb(2,8) = 3"),
+    FuncInfo("Powers and logs", "10ˣ  eˣ", "10^(¦)", "Powers of ten and e (SHIFT + Log, SHIFT + Ln).", "10^(3) = 1000"),
     FuncInfo("Calculus", "d/dx", "d/dx(", "The slope of an expression in x at a point: d/dx(expression, point).", "d/dx(x²,3) = 6"),
     FuncInfo("Calculus", "∫dx", "∫(", "The area under an expression in x: ∫(expression, from, to).", "∫(x²,0,3) = 9"),
     FuncInfo("Calculus", "Σ  Π", "Σ(", "Sum or product of an expression in x for whole numbers: Σ(expression, from, to).", "Σ(x²,1,5) = 55"),
@@ -431,7 +439,7 @@ internal val FuncList = listOf(
     FuncInfo("Numbers", "mod  ÷R", " mod ", "Remainder, or quotient and remainder together: divr(17,5).", "17 mod 5 = 2"),
     FuncInfo("Numbers", "Int  Frac  Sign", "int(", "Whole part, fractional part and sign of a number.", "frac(3.75) = 0.75"),
     FuncInfo("Numbers", "Floor  Ceil  Round", "floor(", "Round down, up, or to the nearest whole number.", "ceil(2.1) = 3"),
-    FuncInfo("Numbers", "|x|", "abs(", "Absolute value (SHIFT + hyp).", "abs(-3) = 3"),
+    FuncInfo("Numbers", "|x|", "abs(¦)", "Absolute value (SHIFT + hyp).", "abs(-3) = 3"),
     FuncInfo("Numbers", "FACT", "", "Prime factors of the number on the screen (SHIFT + °′″).", "360 → 2³×3²×5"),
     FuncInfo("Angles and coordinates", "°′″", "°", "Type degrees, minutes and seconds: 12°30′15″. Press it on an answer to see it that way.", "12°30′"),
     FuncInfo("Angles and coordinates", "Pol  Rec", "Pol(", "Rectangular to polar (r and θ) and back.", "Pol(1,1) → r = 1.414, θ = 45"),

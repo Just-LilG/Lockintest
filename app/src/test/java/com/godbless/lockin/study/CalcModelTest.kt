@@ -613,4 +613,279 @@ class CalcModelTest {
         assertEquals("1÷(2÷3)", prettySum("{1|{2|3}}"))
         assertEquals("plain", prettySum("plain"))
     }
+
+    @Test fun undoSnapshotsAreIndependentOfLaterChanges() {
+        val m = CalcModel()
+        m.tap("2", "=")
+        m.tap("AC", "3")
+        m.vars["A"] = 9.0
+        m.tap("=")
+        assertEquals(2, m.history.size)
+        m.undo()                                    // back to "3" typed, before "="
+        assertEquals("3", m.expr)
+        assertEquals(1, m.history.size)
+        assertEquals(9.0, m.vars["A"]!!, 0.0)
+        m.tap("4", "=")                             // changes after an undo must not reach back into old snapshots
+        m.undo()                                    // before "="
+        m.undo()                                    // before "4": just "3" again
+        assertEquals("3", m.expr)
+        m.undo()                                    // before "3" was typed
+        assertEquals("", m.expr)
+        assertEquals(1, m.history.size)
+        m.undo()                                    // before AC: the first answer is on screen again
+        assertEquals("2", m.resultText())
+        assertEquals(1, m.history.size)
+    }
+
+    @Test fun manyFastPressesStayConsistent() {
+        val m = CalcModel()
+        val keys = listOf("7", "8", "9", "×", "4", "5", "6", "+", "1", "2", "3", "−")
+        repeat(3000) { i ->
+            m.press(key(keys[i % keys.size]))
+            if (i % 25 == 24) m.press(key("="))
+            if (i % 40 == 39) m.press(key("AC"))
+        }
+        assertTrue(m.history.size <= 40)
+        assertTrue(m.cursor in 0..m.expr.length)
+        var undone = 0
+        while (m.undo()) undone++
+        assertTrue(undone <= 30)
+    }
+
+    // ---- typeset templates: powers, roots, |x|, ×10 exponents ----------------------------------
+
+    @Test fun powerKeyBuildsAnExponentSlot() {
+        val m = CalcModel()
+        m.tap("2", "xʸ")
+        assertEquals("2^()", m.expr)
+        assertEquals(3, m.cursor)               // inside the exponent
+        m.tap("3")
+        assertEquals("2^(3)", m.expr)
+        m.tap("=")
+        assertEquals("8", m.resultText())
+        val n = CalcModel()
+        n.tap("2", "xʸ", "3")
+        n.move(1)                               // step out of the exponent
+        n.tap("+", "1", "=")
+        assertEquals("9", n.resultText())
+        val k = CalcModel()
+        k.tap("2", "xʸ", "3", "+", "1")         // without stepping out, the + stays in the exponent
+        assertEquals("2^(3+1)", k.expr)
+        k.tap("=")
+        assertEquals("16", k.resultText())
+        val a = CalcModel()
+        a.tap("3", "=", "xʸ")
+        assertEquals("Ans^()", a.expr)
+        assertEquals(5, a.cursor)
+        a.tap("2", "=")
+        assertEquals("9", a.resultText())
+    }
+
+    @Test fun rootsTakeTheirOwnSlot() {
+        val s = CalcModel()
+        s.tap("√x")
+        assertEquals("√()", s.expr)
+        assertEquals(2, s.cursor)
+        s.tap("9", "=")
+        assertEquals("3", s.resultText())
+        val c = CalcModel()
+        c.tap("SHIFT", "√x", "8", "=")           // cube root
+        assertEquals("∛(8)", c.lastExpr)
+        assertEquals("2", c.resultText())
+        val n = CalcModel()
+        n.tap("3", "SHIFT", "xʸ")                // nth root: the 3 is the index
+        assertEquals("3ˣ√()", n.expr)
+        assertEquals(4, n.cursor)
+        n.tap("8", "=")
+        assertEquals("2", n.resultText())
+        val e = CalcModel()
+        e.tap("SHIFT", "xʸ")                     // no number first: the cursor waits at the index
+        assertEquals("ˣ√()", e.expr)
+        assertEquals(0, e.cursor)
+        e.tap("3")
+        assertEquals("3ˣ√()", e.expr)
+        e.move(1)                                // one step over the whole ˣ√( mark
+        assertEquals(4, e.cursor)
+        e.tap("8", "=")
+        assertEquals("2", e.resultText())
+    }
+
+    @Test fun tenAndEPowersAndAbs() {
+        val t = CalcModel()
+        t.tap("SHIFT", "Log")
+        assertEquals("10^()", t.expr)
+        assertEquals(4, t.cursor)
+        t.tap("3", "=")
+        assertEquals("1000", t.resultText())
+        val e = CalcModel()
+        e.tap("SHIFT", "Ln", "1", "=")
+        assertEquals(Math.E, e.ans, 1e-12)
+        val a = CalcModel()
+        a.tap("SHIFT", "hyp")
+        assertEquals("abs()", a.expr)
+        assertEquals(4, a.cursor)
+        a.tap("(−)", "5", "=")
+        assertEquals("5", a.resultText())
+    }
+
+    @Test fun deletingTemplates() {
+        val m = CalcModel()
+        m.tap("√x")
+        m.tap("DEL")                             // an empty root goes away
+        assertEquals("", m.expr)
+        m.tap("2", "xʸ", "3")
+        m.tap("DEL")                             // the 3
+        assertEquals("2^()", m.expr)
+        m.tap("DEL")                             // the empty exponent slot
+        assertEquals("2", m.expr)
+        m.tap("AC", "2", "xʸ", "3")
+        m.move(1)                                // out of the exponent, after the )
+        assertEquals(5, m.cursor)
+        m.tap("DEL")                             // steps back in instead of breaking the power
+        assertEquals("2^(3)", m.expr)
+        assertEquals(4, m.cursor)
+        m.move(0)                                // to just after the opening
+        assertEquals(3, m.cursor)
+        m.tap("DEL")                             // a full power: step out in front of it
+        assertEquals("2^(3)", m.expr)
+        assertEquals(1, m.cursor)
+    }
+
+    @Test fun typingABracketStepsOverTheTemplateBracket() {
+        val m = CalcModel()
+        m.tap("√x", "2", ")", "=")
+        assertEquals("√2", m.resultText())
+        val n = CalcModel()
+        n.tap("Sin", "3", "0", ")", "+", "1", "=")      // an ordinary function bracket behaves as before
+        assertEquals("3/2", n.resultText())
+    }
+
+    @Test fun fractionsTakeWholePowersRootsAndExponents() {
+        val p = CalcModel(); p.tap("2", "xʸ", "3"); p.move(1); p.tap("a/b")
+        assertEquals("{2^(3)|}", p.expr)
+        val r = CalcModel(); r.tap("3", "SHIFT", "xʸ", "8"); r.move(1); r.tap("a/b")
+        assertEquals("{3ˣ√(8)|}", r.expr)
+        val e = CalcModel(); e.tap("1", "×10ˣ", "5", "a/b")
+        assertEquals("{1E5|}", e.expr)
+        val s = CalcModel(); s.tap("√x", "9"); s.move(1); s.tap("a/b")
+        assertEquals("{√(9)|}", s.expr)
+    }
+
+    @Test fun parsingTemplates() {
+        val nodes = parseSum("2^(3)")!!
+        assertEquals(3, nodes.size)
+        assertEquals("2", (nodes[0] as SumText).text)
+        val g = nodes[1] as SumGroup
+        assertEquals(GroupKind.Pow, g.kind)
+        assertEquals(1, g.open); assertEquals(2, g.openLen); assertEquals(4, g.close)
+        assertEquals("3", (g.body[0] as SumText).text)
+        assertEquals(3, (g.body[0] as SumText).start)
+        val root = parseSum("3ˣ√(8)")!![1] as SumGroup
+        assertEquals(GroupKind.Root, root.kind)
+        assertEquals("3", root.index!!.text)
+        assertEquals("", (parseSum("3ˣ√(8)")!![0] as SumText).text)
+        val sci = parseSum("1.5E-3")!![1] as SumGroup
+        assertEquals(GroupKind.Sci, sci.kind)
+        assertEquals("-3", (sci.body[0] as SumText).text)
+        assertEquals(-1, sci.close)
+        val open = parseSum("2^(3")!![1] as SumGroup        // a bracket left open still draws
+        assertEquals(-1, open.close)
+        assertEquals("3", (open.body[0] as SumText).text)
+        // ordinary brackets inside a template do not end it early
+        val inner = parseSum("√(sin(30)+1)+2")!![1] as SumGroup
+        assertEquals("sin(30)+1", (inner.body[0] as SumText).text)
+        // a plain E (the variable) is not an exponent
+        assertEquals(1, parseSum("2E×6")!!.size)
+        assertTrue(!hasTemplates("2+2"))
+        assertTrue(!hasTemplates("2E×6"))
+        assertTrue(hasTemplates("2^(3)") && hasTemplates("1E5") && hasTemplates("1E") && hasTemplates("{1|2}") && hasTemplates("abs(2)"))
+        val spans = templateGroups("2^(3)")
+        assertEquals(1, spans.size)
+        assertEquals(3, spans[0].bodyStart); assertEquals(4, spans[0].bodyEnd)
+    }
+
+    @Test fun everyCursorSpotBelongsToAPiece() {
+        val sums = listOf(
+            "", "2^(3)", "2^(3)+1", "√(9)", "3ˣ√(8)", "ˣ√()", "abs(−5)", "1E5", "1E", "1E-3", "2^(3^(2))", "sin(√(2)+1)",
+            "{1|2^(3)}", "√({1|2})", "2^(3", "√(", "5E×6", "{1E5|√(3)}", "2^(3)^(4)", "10^(2)×e^(1)",
+            "logb(2,8)", "logb(,)", "logb(2,", "logb(10,√(2))", "{1|logb(2,8)}", "logb(2)",
+        )
+        for (s in sums) {
+            val nodes = parseSum(s)
+            assertTrue("parse $s", nodes != null)
+            for (c in 0..s.length) {
+                val piece = caretPiece(nodes!!, c)
+                assertTrue("$s at $c", piece != null)
+            }
+        }
+    }
+
+    @Test fun logTemplateHasABaseAndAnArgument() {
+        val m = CalcModel()
+        m.tap("logₓy")
+        assertEquals("logb(,)", m.expr)
+        assertEquals(5, m.cursor)               // in the base
+        m.tap("2")
+        assertEquals("logb(2,)", m.expr)
+        m.move(1)                               // over the comma, into the argument
+        assertEquals(7, m.cursor)
+        m.tap("8", "=")
+        assertEquals("3", m.resultText())
+        val d = CalcModel()
+        d.tap("logₓy", "2")
+        d.move(1)
+        d.tap("DEL")                            // at the start of x: back into the base, nothing broken
+        assertEquals("logb(2,)", d.expr)
+        assertEquals(6, d.cursor)
+        val e = CalcModel()
+        e.tap("logₓy", "DEL")                   // an empty log goes away
+        assertEquals("", e.expr)
+        val f = CalcModel()
+        f.tap("logₓy", "2")
+        f.move(1)
+        f.tap("8")
+        f.move(1)
+        f.tap("a/b")
+        assertEquals("{logb(2,8)|}", f.expr)
+        val g = parseSum("logb(2,8)")!![1] as SumGroup
+        assertEquals(GroupKind.Log, g.kind)
+        assertEquals("2", (g.base!![0] as SumText).text)
+        assertEquals("8", (g.body[0] as SumText).text)
+        assertEquals(6, templateGroups("logb(2,8)")[0].comma)
+        assertTrue(hasTemplates("logb(2,8)"))
+    }
+
+    @Test fun aPressThatIsCancelledByAHoldCanBeTakenBackExactly() {
+        val m = CalcModel()
+        m.tap("5", "+")
+        m.press(key("3"))
+        assertTrue(m.pressPushed)
+        m.undo()                                  // what a hold on a key that typed on touch-down does
+        assertEquals("5+", m.expr)
+        assertTrue(!m.pressPushed)
+        m.press(key("SHIFT"))                     // a layer key stores nothing
+        assertTrue(!m.pressPushed)
+        m.press(key("SHIFT"))
+        m.press(key("AC"))
+        assertTrue(m.pressPushed)
+        m.undo()
+        assertEquals("5+", m.expr)
+        // a key pressed twice with no change in between still takes back cleanly
+        val n = CalcModel()
+        n.press(key("AC")); n.press(key("AC"))
+        assertTrue(n.pressPushed)
+        n.tap("7")
+        n.undo()
+        assertEquals("", n.expr)
+    }
+
+    @Test fun speedReadoutIsRememberedAndTimed() {
+        val m = CalcModel()
+        assertTrue(!m.showSpeed)
+        m.showSpeed = true
+        m.press(key("7"))
+        assertTrue(m.lastPressNanos > 0L)
+        assertTrue(m.lastLogicMicros in 0L..50_000L)
+        assertTrue(CalcModel.decode(m.encode()).showSpeed)
+    }
 }

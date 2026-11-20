@@ -23,6 +23,8 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Not asked for in the app: granted once from a computer (adb) so LockIn can switch its own guard back on. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <!-- Starts a lock your partner scheduled, and session reminders, on the minute (Android 12+ asks the person first). -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <!-- Installs the new version when you tap Update (Android asks you to allow this once). -->

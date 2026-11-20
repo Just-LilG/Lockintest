@@ -511,7 +511,7 @@ internal fun ReaderAiSheet(
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
             Box(
-                Modifier.size(36.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClose),
+                Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClose),
                 contentAlignment = Alignment.Center,
             ) { GlyphIcon(Glyph.Close, LockInColors.Silver, boxSize = 13.dp, strokeWidth = 2.2f) }
         }

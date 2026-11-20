@@ -7,7 +7,9 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -26,6 +28,8 @@ data class Textbook(
     val lastPage: Int,
     /** The exam on this book (midnight of its day), or 0. Cards of a book with an exam coming are spaced to be learned by then. */
     val exam: Long = 0L,
+    /** SHA-256 of the file, so the same PDF is not added twice. Empty for books added before this existed. */
+    val hash: String = "",
 )
 
 /** A page you read: on screen for at least a few seconds. [page] counts from 0. */
@@ -86,6 +90,17 @@ class StudyStore(context: Context) {
     private val cardsFile = File(dir, "cards.json")
     private val readsFile = File(dir, "reads.json")
     private val runsFile = File(dir, "quiz_runs.json")
+    private val readSetFile = File(dir, "read_sets.json")
+
+    /** Saving happens on one background thread, in order, so reading and grading never wait on the disk. */
+    private val saver = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "study-save").apply { isDaemon = false } }
+
+    /** For each book, the pages (counted from 0) that stayed on screen long enough to count as read. */
+    private val readSets = HashMap<String, java.util.BitSet>()
+
+    /** Bumps whenever a page is counted as read, so screens that show progress redraw. */
+    var readTick by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
 
     val books = mutableStateListOf<Textbook>()
     val cards = mutableStateListOf<Card>()
@@ -104,6 +119,7 @@ class StudyStore(context: Context) {
         books.addAll(readBooks())
         cards.addAll(readCards())
         reads.addAll(readReads())
+        loadReadSets()
     }
 
     // ----- What you've read -----
@@ -116,6 +132,49 @@ class StudyStore(context: Context) {
         val a = JSONArray()
         reads.forEach { a.put(JSONObject().put("b", it.book).put("p", it.page).put("t", it.at)) }
         runCatching { write(readsFile, a) }
+        if (page >= 0) {
+            readSets.getOrPut(book) { java.util.BitSet() }.set(page)
+            saveReadSets()
+        }
+        readTick++
+    }
+
+    /** How many different pages of [book] have been read. */
+    fun readCount(book: String): Int {
+        readTick // read so a screen showing it redraws when it changes
+        val pages = book(book)?.pages ?: return 0
+        val set = readSets[book] ?: return 0
+        return set.get(0, pages).cardinality()
+    }
+
+    /** Share of [book] that has been read, 0 to 1. Unlike the last page you stopped at, jumping ahead does not raise it. */
+    fun readFraction(b: Textbook): Float = if (b.pages > 0) (readCount(b.id).toFloat() / b.pages).coerceIn(0f, 1f) else 0f
+
+    /** A book counts as finished once nearly all of it has been read. */
+    fun finished(b: Textbook): Boolean = b.pages > 1 && readCount(b.id) * 100 >= b.pages * 90
+
+    /** The set of read pages is kept per book; books that had none yet start with every page up to where they stopped. */
+    private fun loadReadSets() {
+        val loaded = runCatching {
+            val o = JSONObject(readSetFile.readText())
+            for (k in o.keys()) {
+                readSets[k] = java.util.BitSet.valueOf(android.util.Base64.decode(o.getString(k), android.util.Base64.NO_WRAP))
+            }
+            true
+        }.getOrDefault(false)
+        if (!loaded) {
+            // First run of this version: keep the progress the shelf already showed.
+            books.forEach { b -> if (b.lastPage > 0) readSets[b.id] = java.util.BitSet().apply { set(0, (b.lastPage + 1).coerceAtMost(b.pages)) } }
+            reads.forEach { r -> readSets.getOrPut(r.book) { java.util.BitSet() }.set(r.page) }
+            saveReadSets()
+        }
+    }
+
+    private fun saveReadSets() {
+        val o = JSONObject()
+        readSets.forEach { (k, v) -> o.put(k, android.util.Base64.encodeToString(v.toByteArray(), android.util.Base64.NO_WRAP)) }
+        val text = o.toString()
+        saver.execute { runCatching { writeText(readSetFile, text) } }
     }
 
     /** Pages read since [sinceMillis], oldest first, at most [max] (the most recent ones). */
@@ -145,8 +204,21 @@ class StudyStore(context: Context) {
         val id = UUID.randomUUID().toString().replace("-", "").take(12)
         val file = pdfFile(id)
         try {
+            // A huge file would fill the phone: say so before copying it.
+            val size = runCatching {
+                app.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else -1L }
+            }.getOrNull() ?: -1L
+            if (size > MaxPdfBytes) throw AddBookException("That PDF is over ${MaxPdfBytes shr 20} MB. Try a smaller file.")
             val input = app.contentResolver.openInputStream(uri) ?: throw AddBookException("Couldn't read that file.")
             input.use { src -> FileOutputStream(file).use { out -> src.copyTo(out) } }
+            if (file.length() > MaxPdfBytes) throw AddBookException("That PDF is over ${MaxPdfBytes shr 20} MB. Try a smaller file.")
+
+            // The same PDF twice is one book.
+            val hash = sha256(file)
+            for (b in books.toList()) {
+                val same = if (b.hash.isNotEmpty()) b.hash == hash else pdfFile(b.id).let { f -> f.length() == file.length() && sha256(f) == hash }
+                if (same) throw AddBookException("“${prettyTitle(b.title)}” is already on your shelf.")
+            }
 
             val fd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
             val renderer = try {
@@ -158,14 +230,16 @@ class StudyStore(context: Context) {
             val pages = try {
                 val count = renderer.pageCount
                 if (count == 0) throw AddBookException("That PDF has no pages.")
-                val cover = renderPage(renderer, 0, 360)
-                FileOutputStream(thumbFile(id)).use { cover.compress(Bitmap.CompressFormat.PNG, 90, it) }
+                // Sharp enough for a big tile on a tablet or a 3x phone.
+                val cover = renderPage(renderer, 0, 600)
+                FileOutputStream(thumbFile(id)).use { cover.compress(Bitmap.CompressFormat.JPEG, 88, it) }
+                cover.recycle()
                 count
             } finally {
                 renderer.close()
             }
 
-            val book = Textbook(id, displayName(uri), pages, System.currentTimeMillis(), 0)
+            val book = Textbook(id, displayName(uri), pages, System.currentTimeMillis(), 0, hash = hash)
             withContext(Dispatchers.Main) {
                 books.add(0, book)
                 saveBooks()
@@ -185,7 +259,12 @@ class StudyStore(context: Context) {
     /** Deletes a textbook and the cards made from it. */
     fun removeBook(id: String) {
         books.removeAll { it.id == id }
+        // The pictures on its cards go with them.
+        cards.filter { it.book == id && it.image.isNotEmpty() }.forEach { runCatching { imageFile(it.image).delete() } }
         cards.removeAll { it.book == id }
+        readSets.remove(id)
+        saveReadSets()
+        reads.removeAll { it.book == id }
         ai.removeBook(id)
         pdfFile(id).delete()
         thumbFile(id).delete()
@@ -391,7 +470,7 @@ class StudyStore(context: Context) {
     private fun saveBooks() {
         val a = JSONArray()
         books.forEach {
-            a.put(JSONObject().put("id", it.id).put("title", it.title).put("pages", it.pages).put("added", it.added).put("last", it.lastPage).put("exam", it.exam))
+            a.put(JSONObject().put("id", it.id).put("title", it.title).put("pages", it.pages).put("added", it.added).put("last", it.lastPage).put("exam", it.exam).put("hash", it.hash))
         }
         write(booksFile, a)
     }
@@ -408,17 +487,39 @@ class StudyStore(context: Context) {
         write(cardsFile, a)
     }
 
+    /** The text is made now, on the caller's thread, and written a moment later in order by [saver]. */
     private fun write(target: File, array: JSONArray) {
+        val text = array.toString()
+        saver.execute { runCatching { writeText(target, text) } }
+    }
+
+    private fun writeText(target: File, text: String) {
         val tmp = File(dir, target.name + ".tmp")
-        tmp.writeText(array.toString())
-        tmp.renameTo(target)
+        tmp.writeText(text)
+        if (!tmp.renameTo(target)) {
+            target.delete()
+            tmp.renameTo(target)
+        }
+    }
+
+    private fun sha256(f: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { s ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = s.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun readBooks(): List<Textbook> = runCatching {
         val a = JSONArray(booksFile.readText())
         List(a.length()) {
             val o = a.getJSONObject(it)
-            Textbook(o.getString("id"), o.getString("title"), o.getInt("pages"), o.optLong("added"), o.optInt("last"), o.optLong("exam"))
+            Textbook(o.getString("id"), o.getString("title"), o.getInt("pages"), o.optLong("added"), o.optInt("last"), o.optLong("exam"), o.optString("hash"))
         }.filter { pdfFile(it.id).exists() }
     }.getOrDefault(emptyList())
 
@@ -435,6 +536,9 @@ class StudyStore(context: Context) {
 
     companion object {
         private const val DAY_MS = 24L * 60 * 60 * 1000
+
+        /** The biggest PDF that will be copied in (the phone keeps its own copy). */
+        private const val MaxPdfBytes = 400L * 1024 * 1024
 
         /** Days until a card comes back, by box: now, tomorrow, 3 days, a week, 2 weeks, a month. */
         private val Days = longArrayOf(0, 1, 3, 7, 14, 30)

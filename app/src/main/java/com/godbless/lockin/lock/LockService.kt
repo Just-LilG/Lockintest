@@ -168,6 +168,8 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         var lastStrangerHome = 0L
         var guardFloatSince = 0L
         var lastStrangerLock = 0L
+        var lastFloatClose = 0L
+        var lastKeep = 0L
         // The allowed apps the other-apps hold (device owner) was last set for.
         var heldFor: Set<String>? = null
         // Whether LockIn was on screen last time round: leaving it is what counts as an escape.
@@ -247,6 +249,11 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
             // Something switched off what holds the lock: tell the locker (once each).
             if (now - checkAt > 5_000L) {
                 checkAt = now
+                // The guard stopped (a restart, or the phone's battery manager) or was switched off: switch it back on.
+                if (!SettingsGuardService.running() && now - lastKeep > 10_000L) {
+                    lastKeep = now
+                    GuardKeeper.ensure(this)
+                }
                 if (!guard.canOverlay()) warn("overlay_off")
                 if (!guard.isAdmin() && !guard.isOwner() && local.alreadySent("admin_seen")) warn("admin_off")
                 if (guard.isAdmin() || guard.isOwner()) local.markSent("admin_seen")
@@ -372,6 +379,14 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                     lastStrangerHome = now
                     com.godbless.lockin.usage.ScreenKinds.goHome(this)
                 }
+                // A small window of another app: try to close it the way a person would (its frame's close button, or Back).
+                // Home alone doesn't remove a floating window on some phones (HyperOS small window, freeform).
+                if (floating && now - lastFloatClose > 1_200L) {
+                    lastFloatClose = now
+                    SettingsGuardService.appWindows()
+                        ?.filter { !it.full && !it.pip && it.pkg.isNotEmpty() && it.pkg != packageName && it.pkg != "android" && it.pkg !in allowed && it.pkg !in allowedPkgs }
+                        ?.forEach { SettingsGuardService.closeApp(it.pkg) }
+                }
                 // Still there after Home was sent several times: lock the screen. Unlocking brings the cover straight back.
                 if (now - strangerSince > 9_000L && now - lastStrangerLock > 20_000L) {
                     lastStrangerLock = now
@@ -381,7 +396,13 @@ class LockService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                 strangerSince = 0L
             }
             if (wantCover) showCover() else hideCover()
-            if (wantFallback) SettingsGuardService.showLockCover(local.by, coverLeft.intValue) else SettingsGuardService.hideLockCover()
+            // The guard's own cover is an accessibility window, which sits above the app-overlay cover AND above the
+            // floating windows some phones draw over it. So it goes up as well whenever a small window is open, or
+            // another app has stayed usable under the normal cover for a second, as well as when "display over other
+            // apps" is off. This is what stops a floating window from being used through the lock.
+            val strangerHeld = strangerSince != 0L && now - strangerSince > 1_000L
+            val a11yCover = coverWanted && SettingsGuardService.running() && (wantFallback || floating || strangerHeld)
+            if (a11yCover) SettingsGuardService.showLockCover(local.by, coverLeft.intValue) else SettingsGuardService.hideLockCover()
             coverWasUp = coverWanted
 
             // Waits for the next round, but wakes at once when the guard sees a window open, close or move.

@@ -69,19 +69,49 @@ internal fun DrawScope.drawMountain(image: ImageBitmap) {
     }
 }
 
-private val Palette = Array(ClimberPalette.size) { Color(ClimberPalette[it]) }
+private fun themed(overrides: Map<Int, Long>) = Array(ClimberPalette.size) { i ->
+    Color(overrides[i]?.toInt() ?: ClimberPalette[i])
+}
+
+/** Black kit for the dark theme. Only the clothing and gear change; skin, hair, goggles and the accent stay. */
+private val DarkPalette = themed(mapOf(
+    Tone.INK to 0xFF2A2E36, Tone.JACKET to 0xFF0E0F12, Tone.JACKET_FAR to 0xFF08090B, Tone.PANTS to 0xFF15171B,
+    Tone.PANTS_FAR to 0xFF0C0D10, Tone.BOOT to 0xFF0A0B0D, Tone.GLOVE to 0xFF121317, Tone.PACK to 0xFF1A1C21,
+    Tone.ROLL to 0xFF24272D, Tone.JACKET_SHADE to 0xFF23262C, Tone.PANTS_SHADE to 0xFF121418, Tone.GAITER to 0xFF0F1013,
+    Tone.HOOD to 0xFF1A1C21, Tone.SLEEVE_SHADE to 0xFF1D2026, Tone.GLOVE_HI to 0xFF3A3F48, Tone.PACK_SHADE to 0xFF101216,
+    Tone.PACK_LID to 0xFF24272D, Tone.PANTS_HI to 0xFF4A4F59, Tone.JACKET_DEEP to 0xFF060709, Tone.PANTS_DEEP to 0xFF08090B,
+    Tone.PACK_DEEP to 0xFF2B2F36,
+))
+
+/** White kit for the light theme, shaded in cool greys so the folds still read. The dark outline keeps it crisp. */
+private val LightPalette = themed(mapOf(
+    Tone.JACKET to 0xFFF4F6FA, Tone.JACKET_FAR to 0xFFD5DAE3, Tone.PANTS to 0xFFE9ECF2, Tone.PANTS_FAR to 0xFFCDD3DD,
+    Tone.BOOT to 0xFFE3E6EC, Tone.GLOVE to 0xFFEEF0F5, Tone.PACK to 0xFFDFE3EA, Tone.ROLL to 0xFFC4CAD4,
+    Tone.JACKET_SHADE to 0xFFC9CFDA, Tone.PANTS_SHADE to 0xFFC2C8D3, Tone.GAITER to 0xFFD0D5DE, Tone.HOOD to 0xFFE6E9EF,
+    Tone.SLEEVE_SHADE to 0xFFCBD1DB, Tone.GLOVE_HI to 0xFFFFFFFF, Tone.PACK_SHADE to 0xFFC8CDD7, Tone.PACK_LID to 0xFFEEF0F4,
+    Tone.PANTS_HI to 0xFFFFFFFF, Tone.JACKET_DEEP to 0xFFB8BFCB, Tone.PANTS_DEEP to 0xFFB3BAC6, Tone.PACK_DEEP to 0xFFA9B0BD,
+))
 
 private val scratchPath = Path()
 
 /** Draws one climber from the shapes built in [ClimberShapes]. */
 internal fun DrawScope.drawClimber(c: ClimberSpec, p: Pose) {
     val prims = ClimberShapes.build(c, p)
+    val Palette = if (com.godbless.lockin.ui.LockInColors.isDark) DarkPalette else LightPalette
     for (pr in prims) {
         // The helmet band and zip follow the theme's accent.
         val color = if (pr.tone == Tone.ACCENT) com.godbless.lockin.ui.LockInColors.Lime else Palette[pr.tone]
         val v = pr.pts
         when (pr.kind) {
             0 -> drawCircle(color, v[2], Offset(v[0], v[1]))
+            // A soft disc: full colour towards the middle, fading to nothing at the edge.
+            3 -> drawCircle(
+                brush = Brush.radialGradient(
+                    0f to color.copy(alpha = 0.85f), 0.45f to color.copy(alpha = 0.55f), 1f to color.copy(alpha = 0f),
+                    center = Offset(v[0], v[1]), radius = v[2],
+                ),
+                radius = v[2], center = Offset(v[0], v[1]),
+            )
             1 -> {
                 scratchPath.rewind()
                 scratchPath.moveTo(v[0], v[1])

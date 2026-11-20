@@ -182,11 +182,11 @@ internal fun SelectionBar(
                     val y = if (above > topLimit) above else (r.bottom + gap).coerceAtMost(maxH - size.height - margin)
                     IntOffset(x.roundToInt(), y.roundToInt())
                 }
-                .height(48.dp)
+                .height(52.dp)
                 .clip(shape)
                 .background(LockInColors.Slate)
                 .border(1.dp, LockInColors.Rim, shape)
-                .padding(4.dp),
+                .padding(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
@@ -207,7 +207,7 @@ internal fun SelectionBar(
             ) { Text("Ask", style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 14.sp)) }
             Box(Modifier.width(1.dp).height(20.dp).background(LockInColors.Graphite))
             Box(
-                Modifier.size(40.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClear),
+                Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClear),
                 contentAlignment = Alignment.Center,
             ) { GlyphIcon(Glyph.Close, LockInColors.Silver, boxSize = 12.dp, strokeWidth = 2.2f) }
         }
@@ -226,10 +226,12 @@ internal fun SelectHint(text: String, onCancel: () -> Unit, modifier: Modifier =
     ) {
         GlyphIcon(Glyph.Select, LockInColors.OnLime, boxSize = 18.dp)
         Text(text, style = LockInText.Label.copy(color = LockInColors.OnLime, fontSize = 14.sp), modifier = Modifier.padding(start = 8.dp, end = 8.dp))
-        Box(
-            Modifier.size(32.dp).clip(CircleShape).background(LockInColors.OnLime.copy(alpha = 0.14f)).clickable(role = Role.Button, onClick = onCancel),
-            contentAlignment = Alignment.Center,
-        ) { GlyphIcon(Glyph.Close, LockInColors.OnLime, boxSize = 11.dp, strokeWidth = 2.4f) }
+        // 48 dp to touch, a 32 dp button drawn in it.
+        Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onCancel), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(32.dp).clip(CircleShape).background(LockInColors.OnLime.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
+                GlyphIcon(Glyph.Close, LockInColors.OnLime, boxSize = 11.dp, strokeWidth = 2.4f)
+            }
+        }
     }
 }
 
@@ -249,7 +251,8 @@ private val FollowUps = listOf(
     Triple("Simpler", "simpler", ""),
     Triple("Another example", "example", ""),
     Triple("Why does it matter here?", "ask", "Why does this matter on this page? How does it connect to what the page is teaching?"),
-    Triple("Test me", "ask", "Ask me one short question to check I understood this, then give the answer on a new line starting with 'Answer:'."),
+    Triple("Hint", "hint", ""),
+    Triple("Check me", "check", ""),
 )
 
 /**
@@ -273,6 +276,14 @@ internal fun PassageSheet(
     val page = args.sel.page
     val picture: ImageBitmap = remember(args) { args.picture.asImageBitmap() }
 
+    // The book's own text (read from the PDF once, in the background) and short notes about the book. Both are extras:
+    // the AI works from the page pictures without them.
+    var index by remember(bookId) { mutableStateOf(BookTexts.cached(bookId)) }
+    var notes by remember(bookId) { mutableStateOf(BookNotes.get(store, bookId)) }
+    var learning by remember(bookId) { mutableStateOf(false) }
+    LaunchedEffect(bookId) { if (index == null) index = BookTexts.ensure(store, bookId) }
+    var hintLevel by remember(args) { mutableIntStateOf(0) }
+
     var first by remember(args) { mutableStateOf<AiPassage?>(null) }
     var loading by remember(args) { mutableStateOf(false) }
     var error by remember(args) { mutableStateOf<String?>(null) }
@@ -294,11 +305,12 @@ internal fun PassageSheet(
         turns.filter { it.answer != null }.takeLast(3).forEach { append("Q: ").append(it.ask).append(" A: ").append(it.answer).append(' ') }
     }
 
-    suspend fun call(mode: String, q: String): Result<AiPassage> {
+    suspend fun call(mode: String, q: String, level: Int = 1): Result<AiPassage> {
         val repo = ai ?: return Result.failure(IllegalStateException("The AI isn't available right now."))
         val pg = runCatching { pagesForAi(store, listOf(bookId to page)) }.getOrNull()?.firstOrNull()
             ?: return Result.failure(IllegalStateException("Couldn't read this page."))
-        return repo.passage(pg, args.snip, mode, q, prior())
+        val ctx = AiContext.build(index, page, q, notes.orEmpty(), AiContext.weakTopics(store.cards, bookId))
+        return repo.passage(pg, args.snip, mode, q, prior(), ctx, level)
     }
 
     // Keep the picture beside the history entry, so it can be shown again later.
@@ -310,6 +322,23 @@ internal fun PassageSheet(
         historyId = store.ai.logPassage(bookId, book?.title ?: "", page + 1, p, args.sel.norm().list(), name)
     }
 
+    // Once per book, after the first answer is shown: notes about the whole book from samples of its text, kept beside
+    // the PDF and sent with later questions. One AI call, never repeated, and silent when it fails.
+    fun learnBook() {
+        val repo = ai ?: return
+        val ix = index ?: return
+        if (notes != null || learning || ix.pageCount < 8) return
+        learning = true
+        scope.launch {
+            val texts = AiContext.samplePages(ix.pagesWithText).mapNotNull { p -> ix.pageText(p)?.let { (p + 1) to it.take(800) } }
+            repo.digest(book?.title ?: "", texts).onSuccess { d ->
+                val n = AiContext.notesText(d.summary, d.glossary)
+                if (n.isNotBlank()) { notes = n; BookNotes.save(store, bookId, n) }
+            }
+            learning = false
+        }
+    }
+
     fun explain() {
         loading = true
         error = null
@@ -317,6 +346,7 @@ internal fun PassageSheet(
             call("explain", "").onSuccess { p ->
                 first = p
                 saveFirst(p)
+                learnBook()
             }.onFailure { error = it.message ?: "Couldn't explain that. Try again." }
             loading = false
         }
@@ -328,7 +358,8 @@ internal fun PassageSheet(
         turns.add(t)
         scope.launch {
             scroll.animateScrollTo(scroll.maxValue)
-            call(mode, q).onSuccess { p ->
+            val level = if (mode == "hint") { hintLevel = (hintLevel + 1).coerceAtMost(3); hintLevel } else 1
+            call(mode, q, level).onSuccess { p ->
                 val text = when (mode) {
                     "simpler" -> listOf(p.meaning, p.example).filter { it.isNotBlank() }.joinToString("\n\n")
                     else -> p.answer.ifBlank { p.meaning }
@@ -460,7 +491,8 @@ internal fun PassageSheet(
                     Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FollowUps.forEach { (label, mode, q) ->
+                    FollowUps.forEach { (label0, mode, q) ->
+                        val label = if (mode == "hint") when (hintLevel) { 0 -> "Hint"; 1 -> "Bigger hint"; else -> "Show solution" } else label0
                         Box(
                             Modifier
                                 .height(36.dp)

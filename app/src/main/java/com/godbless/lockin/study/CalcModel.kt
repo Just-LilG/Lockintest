@@ -67,23 +67,23 @@ internal object CalcKeys {
         ),
         listOf(
             CalcKeyDef("2nd", act = KeyAct.Second, style = KeyStyle.Mode, spoken = "second function"),
-            CalcKeyDef("logₓy", "logb(", shift = L("Σ", "Σ("), alpha = L("Π", "Π("), spoken = "log to any base"),
+            CalcKeyDef("logₓy", "logb(¦,)", shift = L("Σ", "Σ("), alpha = L("Π", "Π("), spoken = "log to any base"),
         ),
     )
 
     val SciRows = listOf(
         listOf(
             CalcKeyDef("a/b", "/", act = KeyAct.Frac, alpha = L("÷R", "divr("), spoken = "fraction"),
-            CalcKeyDef("√x", "√(", shift = L("∛x", "∛("), alpha = L("mod", " mod "), second = L("Int", "int("), spoken = "square root"),
+            CalcKeyDef("√x", "√(¦)", shift = L("∛x", "∛(¦)"), alpha = L("mod", " mod "), second = L("Int", "int("), spoken = "square root"),
             CalcKeyDef("x²", "²", shift = L("x³", "³"), alpha = L("z", "z"), second = L("Frac", "frac("), spoken = "squared"),
-            CalcKeyDef("xʸ", "^", shift = L("ˣ√y", "ˣ√"), second = L("Sign", "sign("), spoken = "power"),
-            CalcKeyDef("Log", "log(", shift = L("10ˣ", "10^("), second = L("log₂", "log2(")),
-            CalcKeyDef("Ln", "ln(", shift = L("eˣ", "e^("), alpha = L("t", "t"), second = L("Round", "round(")),
+            CalcKeyDef("xʸ", "^(¦)", shift = L("ˣ√y", "ˣ√(¦)"), second = L("Sign", "sign("), spoken = "power"),
+            CalcKeyDef("Log", "log(", shift = L("10ˣ", "10^(¦)"), second = L("log₂", "log2(")),
+            CalcKeyDef("Ln", "ln(", shift = L("eˣ", "e^(¦)"), alpha = L("t", "t"), second = L("Round", "round(")),
         ),
         listOf(
             CalcKeyDef("(−)", "−", shift = L("∠", "∠"), alpha = L("A", "A"), spoken = "negative"),
             CalcKeyDef("°′″", "°", act = KeyAct.Dms, shift = L("FACT", act = KeyAct.Fact), alpha = L("B", "B"), spoken = "degrees minutes seconds"),
-            CalcKeyDef("hyp", act = KeyAct.Hyp, shift = L("|x|", "abs("), alpha = L("C", "C"), style = KeyStyle.Mode, spoken = "hyperbolic"),
+            CalcKeyDef("hyp", act = KeyAct.Hyp, shift = L("|x|", "abs(¦)"), alpha = L("C", "C"), style = KeyStyle.Mode, spoken = "hyperbolic"),
             trig("sin", "D"), trig("cos", "E"), trig("tan", "F"),
         ),
         listOf(
@@ -180,28 +180,55 @@ internal fun fractionSpans(text: String): List<FracSpan> {
     return out
 }
 
-/** A sum split for drawing: plain text pieces and stacked fractions (which hold more pieces). */
+/** What kind of template a [SumGroup] is. */
+internal enum class GroupKind { Pow, Sqrt, Cbrt, Root, Abs, Sci, Log }
+
+/** A sum split for drawing: plain text pieces, stacked fractions, and templates (powers, roots, |x|, ×10 with exponent). */
 internal sealed class SumNode
 
 internal class SumText(val start: Int, val text: String) : SumNode()
 
 internal class SumFrac(val open: Int, val top: List<SumNode>, val bottom: List<SumNode>, val close: Int) : SumNode()
 
-/** Splits a sum into text and fractions, or null if the { | } marks don't pair up. Every gap gets a (maybe empty) text piece. */
+/**
+ * A template inside the sum. [open] is where its opening text starts (`^(`, `√(`, `∛(`, `ˣ√(`, `abs(`, or the `E` of
+ * 1E5) and [openLen] how long that is. [index] is the little number in front of an nth root. [close] is where the `)` is,
+ * or -1 when there is none (an E exponent, or a group that was left open).
+ */
+internal class SumGroup(
+    val kind: GroupKind, val open: Int, val openLen: Int, val index: SumText?, val body: List<SumNode>, val close: Int,
+    /** For `logb(base,x)`: the base, drawn small and low in front of the bracket. [body] then holds x. */
+    val base: List<SumNode>? = null,
+) : SumNode()
+
+private val openers = listOf(
+    "ˣ√(" to GroupKind.Root, "^(" to GroupKind.Pow, "√(" to GroupKind.Sqrt, "∛(" to GroupKind.Cbrt, "abs(" to GroupKind.Abs,
+    "logb(" to GroupKind.Log,
+)
+
+private fun isSign(c: Char) = c == '-' || c == '−' || c == '+'
+
+/**
+ * Splits a sum into text and templates, or null if the { | } marks of a fraction don't pair up. Every gap gets a
+ * (maybe empty) text piece, so the cursor always has somewhere to be.
+ */
 internal fun parseSum(text: String): List<SumNode>? {
     var i = 0
+    fun sciFollows(j: Int) = j >= text.length || text[j].isDigit() || (isSign(text[j]) && (j + 1 >= text.length || text[j + 1].isDigit()))
     fun seq(stop: Char?): List<SumNode>? {
         val out = ArrayList<SumNode>()
         var segStart = i
+        var depth = 0 // ordinary brackets opened inside this part (only matters for a template that ends at its own ")")
+        fun flush(end: Int) { out += SumText(segStart, text.substring(segStart, end)) }
         while (true) {
             if (i >= text.length) {
-                if (stop != null) return null
-                out += SumText(segStart, text.substring(segStart, i))
+                if (stop != null && stop != ')' && stop != ',') return null
+                flush(i)
                 return out
             }
             val ch = text[i]
             if (ch == '{') {
-                out += SumText(segStart, text.substring(segStart, i))
+                flush(i)
                 val open = i
                 i++
                 val top = seq('|') ?: return null
@@ -210,30 +237,130 @@ internal fun parseSum(text: String): List<SumNode>? {
                 i++ // the closing mark
                 out += SumFrac(open, top, bottom, i - 1)
                 segStart = i
-            } else if (stop != null && ch == stop) {
-                out += SumText(segStart, text.substring(segStart, i))
-                return out
             } else if (ch == '|' || ch == '}') {
+                if (stop == ')' || stop == ',' || (stop != null && ch == stop)) { flush(i); return out }
                 return null
+            } else if ((stop == ')' || stop == ',') && ch == ')' && depth == 0) {
+                flush(i)
+                return out
+            } else if (stop == ',' && ch == ',' && depth == 0) {
+                flush(i)
+                return out
             } else {
-                i++
+                val opener = openers.firstOrNull { text.startsWith(it.first, i) }
+                if (opener != null && (opener.second != GroupKind.Abs || i == 0 || !text[i - 1].isLetter())) {
+                    var index: SumText? = null
+                    var cut = i
+                    if (opener.second == GroupKind.Root) {
+                        // the number just before ˣ√( is the little index of the root
+                        var k = i
+                        while (k > segStart && (text[k - 1].isDigit() || text[k - 1] == '.')) k--
+                        if (k == i && k > segStart && (text[k - 1].isLetter() || text[k - 1] == 'π')) k--
+                        index = SumText(k, text.substring(k, i))
+                        cut = k
+                    }
+                    flush(cut)
+                    val open = i
+                    i += opener.first.length
+                    var base: List<SumNode>? = null
+                    val body: List<SumNode>
+                    if (opener.second == GroupKind.Log) {
+                        base = seq(',') ?: return null
+                        if (i < text.length && text[i] == ',') {
+                            i++
+                            body = seq(')') ?: return null
+                        } else {
+                            body = listOf(SumText(i, ""))
+                        }
+                    } else {
+                        body = seq(')') ?: return null
+                    }
+                    var close = -1
+                    if (i < text.length && text[i] == ')') { close = i; i++ }
+                    out += SumGroup(opener.second, open, opener.first.length, index, body, close, base)
+                    segStart = i
+                } else if (ch == 'E' && i > segStart && (text[i - 1].isDigit() || text[i - 1] == '.') && sciFollows(i + 1)) {
+                    flush(i)
+                    val open = i
+                    i++
+                    val expStart = i
+                    if (i < text.length && isSign(text[i])) i++
+                    while (i < text.length && text[i].isDigit()) i++
+                    out += SumGroup(GroupKind.Sci, open, 1, null, listOf(SumText(expStart, text.substring(expStart, i))), -1)
+                    segStart = i
+                } else {
+                    if (ch == '(') depth++ else if (ch == ')' && depth > 0) depth--
+                    i++
+                }
             }
         }
     }
     return seq(null)
 }
 
-/** The text piece the cursor is in (each cursor position is in exactly one piece). */
-internal fun caretPiece(nodes: List<SumNode>, cursor: Int): SumText? {
-    for (n in nodes) {
-        when (n) {
-            is SumText -> if (cursor >= n.start && cursor <= n.start + n.text.length) return n
-            is SumFrac -> (caretPiece(n.top, cursor) ?: caretPiece(n.bottom, cursor))?.let { return it }
+/** Every text piece of a sum, in reading order. */
+internal fun sumPieces(nodes: List<SumNode>): List<SumText> {
+    val out = ArrayList<SumText>()
+    fun walk(list: List<SumNode>) {
+        for (n in list) when (n) {
+            is SumText -> out += n
+            is SumFrac -> { walk(n.top); walk(n.bottom) }
+            is SumGroup -> { n.index?.let { out += it }; n.base?.let { walk(it) }; walk(n.body) }
         }
     }
-    return null
+    walk(nodes)
+    return out
 }
 
+/** The text piece the cursor is in. A position that sits inside a template's own marks goes to the nearest piece. */
+internal fun caretPiece(nodes: List<SumNode>, cursor: Int): SumText? {
+    val all = sumPieces(nodes)
+    all.firstOrNull { cursor >= it.start && cursor <= it.start + it.text.length }?.let { return it }
+    return all.minByOrNull { minOf(kotlin.math.abs(cursor - it.start), kotlin.math.abs(cursor - (it.start + it.text.length))) }
+}
+
+/** Where one template sits in the sum text (for DEL). [close] is -1 if it has no `)`. */
+internal class GroupSpan(
+    val kind: GroupKind, val open: Int, val openLen: Int, val close: Int, val bodyStart: Int, val bodyEnd: Int,
+    /** Nothing typed inside at all. */
+    val empty: Boolean,
+    /** For logb(base,x): where the comma is, else -1. */
+    val comma: Int,
+)
+
+internal fun templateGroups(text: String): List<GroupSpan> {
+    val nodes = parseSum(text) ?: return emptyList()
+    val out = ArrayList<GroupSpan>()
+    fun walk(list: List<SumNode>) {
+        for (n in list) when (n) {
+            is SumText -> {}
+            is SumFrac -> { walk(n.top); walk(n.bottom) }
+            is SumGroup -> {
+                val pieces = sumPieces(n.body)
+                val end = pieces.lastOrNull()?.let { it.start + it.text.length } ?: (n.open + n.openLen)
+                val all = (n.base?.let { sumPieces(it) } ?: emptyList()) + pieces
+                val comma = n.base?.let { b -> sumPieces(b).lastOrNull()?.let { it.start + it.text.length }?.takeIf { it < text.length && text[it] == ',' } } ?: -1
+                out += GroupSpan(n.kind, n.open, n.openLen, n.close, n.open + n.openLen, end, all.all { it.text.isEmpty() }, comma)
+                n.base?.let { walk(it) }
+                walk(n.body)
+            }
+        }
+    }
+    walk(nodes)
+    return out
+}
+
+private val sciExponent = Regex("[0-9.]E([+\\-−]?[0-9]|[+\\-−]?$)")
+
+/** True if the sum has anything that needs the template drawing (fractions, powers, roots, |x|, ×10 exponents). */
+internal fun hasTemplates(text: String): Boolean =
+    '{' in text || "^(" in text || "√(" in text || "∛(" in text || "abs(" in text || "logb(" in text || sciExponent.containsMatchIn(text)
+
+private val digitThenE = Regex("[0-9]E")
+private val trigCall = Regex("(?<![h])(a?(sin|cos|tan|cot))\\(")
+private val thousandsComma = Regex("""(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])""")
+private val thousandsSpace = Regex("""(?<![\d.,])\d{1,3}(?: \d{3})+(?![\d,])""")
+private val digitCommaDigit = Regex("""\d,\d""")
 private val simpleFraction = Regex("\\{([^{}|]*)\\|([^{}|]*)\\}")
 
 /** A sum written on one line for lists: {1|2} becomes 1÷2, {1+2|3} becomes (1+2)÷3. */
@@ -283,6 +410,16 @@ internal class CalcModel {
     var polar = false
     var haptics = true
 
+    /** Show how long each key press takes (debug readout on the display). */
+    var showSpeed = false
+
+    /** When the last key press started (nanoTime), and how long the keypad logic took for it, in microseconds. */
+    var lastPressNanos = 0L
+    var lastLogicMicros = 0L
+
+    /** True if the last key press stored an Undo step (so a press that is cancelled by a long hold can be taken back exactly). */
+    var pressPushed = false
+
     // ---- One-shot layers and answer views ------------------------------------------------------
     var shift = false
     var alpha = false
@@ -324,8 +461,8 @@ internal class CalcModel {
     private val tokens = listOf(
         "asinh(", "acosh(", "atanh(", "round(", "floor(", "RanInt(", "sinh(", "cosh(", "tanh(", "asin(", "acos(", "atan(", "acot(",
         "ceil(", "frac(", "sign(", "divr(", "logb(", "d/dx(", "PreAns", "sin(", "cos(", "tan(", "cot(", "log2(", "log(", "int(",
-        "gcd(", "lcm(", "Pol(", "Rec(", "lim(", "ln(", "abs(", "10^(", "e^(", "√(", "∛(", "∫(", "Σ(", "Π(",
-        " mod ", "Ran#", "Ans", "ˣ√", "⁻¹",
+        "gcd(", "lcm(", "Pol(", "Rec(", "lim(", "ln(", "abs(", "√(", "∛(", "∫(", "Σ(", "Π(",
+        " mod ", "Ran#", "Ans", "ˣ√(", "ˣ√", "^(", "⁻¹",
     )
 
     private fun tokenBefore(before: String): Int {
@@ -352,6 +489,11 @@ internal class CalcModel {
 
     fun type(text: String, fresh: Boolean = false) {
         if (text.isEmpty()) return
+        // Typing ")" right before a template's own closing bracket just steps over it, so habit still works.
+        if (text == ")" && !done) {
+            val c = cursor.coerceIn(0, expr.length)
+            if (c < expr.length && expr[c] == ')' && templateGroups(expr).any { it.close == c }) { cursor = c + 1; return }
+        }
         if (done) {
             val keep = !fresh && text in carryOn
             leaveAnswer()
@@ -376,6 +518,7 @@ internal class CalcModel {
         if (c == 0) return
         val before = expr.substring(0, c)
         if (before.last() == '{' || before.last() == '|' || before.last() == '}') { deleteAtFraction(c); return }
+        if (before.last() == '(' || before.last() == ')' || before.last() == ',') { if (deleteAtTemplate(c)) return }
         val n = tokenBefore(before)
         expr = expr.substring(0, c - n) + expr.substring(c)
         cursor = c - n
@@ -412,6 +555,26 @@ internal class CalcModel {
         }
     }
 
+    /**
+     * DEL right after a template's opening (`^(`, `√(`…) takes an empty template away, or steps out of a full one; DEL right
+     * after its closing `)` steps back inside instead of leaving a half template. True if it handled the key.
+     */
+    private fun deleteAtTemplate(c: Int): Boolean {
+        val g = templateGroups(expr).firstOrNull { c == it.open + it.openLen || (it.close >= 0 && c == it.close + 1) || (it.comma >= 0 && c == it.comma + 1) } ?: return false
+        if (g.close >= 0 && c == g.close + 1) { cursor = g.close; return true }
+        if (g.comma >= 0 && c == g.comma + 1) {
+            // DEL at the start of a log's x: an empty log goes away, otherwise step back into the base
+            if (!g.empty) { cursor = g.comma; return true }
+        } else if (!g.empty) {
+            cursor = g.open
+            return true
+        }
+        val end = if (g.close >= 0) g.close + 1 else g.open + g.openLen
+        expr = expr.substring(0, g.open) + expr.substring(end)
+        cursor = g.open
+        return true
+    }
+
     // ---- Stacked fractions ---------------------------------------------------------------------
 
     /** How much of [before] is the number (or bracket, function, fraction…) a new fraction should take as its top. */
@@ -442,7 +605,16 @@ internal class CalcModel {
                 if (depth != 0) return 0
                 var start = k
                 val fn = tokens.firstOrNull { it.endsWith("(") && s.substring(0, k + 1).endsWith(it) }
-                if (fn != null) start = k + 1 - fn.length
+                if (k >= 2 && s[k - 1] == '√' && s[k - 2] == 'ˣ') {
+                    // an nth root: take its index too
+                    var j = k - 2
+                    while (j > 0 && (s[j - 1].isDigit() || s[j - 1] == '.')) j--
+                    start = j
+                } else if (k > 0 && s[k - 1] == '^') {
+                    // a power: take its base too
+                    val base = coreOperandLength(s.substring(0, k - 1))
+                    start = k - 1 - base
+                } else if (fn != null && fn != "^(") start = k + 1 - fn.length
                 else if (k > 0 && (s[k - 1] == '√' || s[k - 1] == '∛')) start = k - 1
                 return s.length - start
             }
@@ -459,6 +631,13 @@ internal class CalcModel {
             last.isDigit() || last == '.' -> {
                 var k = s.length
                 while (k > 0 && (s[k - 1].isDigit() || s[k - 1] == '.')) k--
+                // 1.5E3: the exponent belongs with its number
+                var e = k
+                if (e > 0 && (s[e - 1] == '-' || s[e - 1] == '−' || s[e - 1] == '+')) e--
+                if (e > 0 && s[e - 1] == 'E' && e >= 2 && (s[e - 2].isDigit() || s[e - 2] == '.')) {
+                    k = e - 1
+                    while (k > 0 && (s[k - 1].isDigit() || s[k - 1] == '.')) k--
+                }
                 return s.length - k
             }
             else -> {
@@ -467,6 +646,28 @@ internal class CalcModel {
                 return if (last.isLetter() || last == 'π' || last == '∞') 1 else 0
             }
         }
+    }
+
+    /**
+     * Types a template (a power, a root, |x|): the text up to the ¦ mark, a closing bracket, and the cursor lands on the mark.
+     * After an answer a power or root works on Ans, like an operator. An nth root with no number in front leaves the
+     * cursor at its (empty) index, so you type the index first and then step right into the root.
+     */
+    private fun typeTemplate(raw: String) {
+        val mark = raw.indexOf('¦')
+        val text = raw.replace("¦", "")
+        val carries = text.startsWith("^") || text.startsWith("ˣ√")
+        if (done) {
+            leaveAnswer()
+            expr = (if (carries) "Ans" else "") + text
+            cursor = (if (carries) 3 else 0) + mark
+            return
+        }
+        val c = cursor.coerceIn(0, expr.length)
+        var at = mark
+        if (text.startsWith("ˣ√") && operandLengthBefore(expr.substring(0, c)) == 0) at = 0
+        expr = expr.substring(0, c) + text + expr.substring(c)
+        cursor = c + at
     }
 
     /** The a/b key: a stacked fraction. The number before the cursor becomes the top and the cursor drops to the bottom. */
@@ -536,13 +737,28 @@ internal class CalcModel {
 
     // ---- Undo --------------------------------------------------------------------------------
 
-    private val undoStack = ArrayList<String>()
+    /** The work at one moment, for Undo. Plain values kept in memory: no text conversion on every key press. */
+    private data class Snap(
+        val expr: String, val cursor: Int, val lastExpr: String, val done: Boolean,
+        val ans: Double, val ansIm: Double, val preAns: Double, val memory: Double,
+        val vars: Map<String, Double>, val lines: List<Pair<String, String>>, val complexText: String,
+        val history: List<Pair<String, String>>,
+        val flip: Boolean, val eng: Boolean, val si: Boolean, val dms: Boolean, val noExact: Boolean, val isBool: Boolean,
+        val promptKind: Int, val promptExpr: String, val promptVars: List<String>, val promptIndex: Int,
+    )
+
+    private val undoStack = ArrayList<Snap>()
 
     val canUndo: Boolean get() = undoStack.isNotEmpty()
 
     /** Remembers the state before a change, so Undo can bring it back. */
     fun checkpoint() {
-        val s = encode()
+        val s = Snap(
+            expr, cursor, lastExpr, done, ans, ansIm, preAns, memory, LinkedHashMap(vars), lines, complexText, ArrayList(history),
+            flip, eng, si, dms, noExact, isBool, promptKind, promptExpr, promptVars, promptIndex,
+        )
+        // If the state is the same as the last step, that step already is this press's way back.
+        pressPushed = true
         if (undoStack.lastOrNull() == s) return
         undoStack.add(s)
         if (undoStack.size > 30) undoStack.removeAt(0)
@@ -550,7 +766,7 @@ internal class CalcModel {
 
     fun undo(): Boolean {
         if (undoStack.isEmpty()) return false
-        val o = decode(undoStack.removeAt(undoStack.lastIndex))
+        val o = undoStack.removeAt(undoStack.lastIndex)
         // Settings (angle, format, theme…) stay as they are; only the work itself goes back.
         expr = o.expr; cursor = o.cursor; lastExpr = o.lastExpr; done = o.done; error = ""
         ans = o.ans; ansIm = o.ansIm; preAns = o.preAns; memory = o.memory
@@ -558,17 +774,18 @@ internal class CalcModel {
         lines = o.lines; complexText = o.complexText
         history.clear(); history.addAll(o.history)
         browse = -1
-        flip = o.flip; eng = o.eng; si = o.si; dms = o.dms; noExact = o.noExact
+        flip = o.flip; eng = o.eng; si = o.si; dms = o.dms; noExact = o.noExact; isBool = o.isBool
         promptKind = o.promptKind; promptExpr = o.promptExpr; promptVars = o.promptVars; promptIndex = o.promptIndex
         shift = false; alpha = false; second = false; hyp = false
         refresh()
+        pressPushed = false
         return true
     }
 
     /** Typing from a menu (a function name, a constant): undoable, and the preview updates. */
     fun insert(text: String) {
         checkpoint()
-        type(text)
+        if ('¦' in text) typeTemplate(text) else type(text)
         refresh()
     }
 
@@ -586,6 +803,9 @@ internal class CalcModel {
     fun shownLabel(k: CalcKeyDef): String = keyLabel(k, shift, hyp, second)
 
     fun press(k: CalcKeyDef): Req {
+        val started = System.nanoTime()
+        lastPressNanos = started
+        pressPushed = false
         error = ""
         val l = layer(k)
         when (l.act) {
@@ -602,6 +822,7 @@ internal class CalcModel {
         checkpoint()
         val req = run(l)
         refresh()
+        lastLogicMicros = (System.nanoTime() - started) / 1000
         return req
     }
 
@@ -644,6 +865,7 @@ internal class CalcModel {
                 l.label == "(−)" && l.insert == "−" -> type("−", fresh = true)
                 l.label == "×10ˣ" && l.insert == "E" -> typeExp()
                 l.act == KeyAct.Frac -> typeFraction()
+                '¦' in l.insert -> typeTemplate(l.insert)
                 else -> type(l.insert)
             }
         }
@@ -722,7 +944,7 @@ internal class CalcModel {
      * random number) answers in decimals; only whole numbers and fractions give exact answers like 3/4 or √2/2.
      */
     private fun exactAllowed(src: String): Boolean =
-        !noExact && '.' !in src && '°' !in src && !Regex("[0-9]E").containsMatchIn(src) && "Ran" !in src
+        !noExact && '.' !in src && '°' !in src && !digitThenE.containsMatchIn(src) && "Ran" !in src
 
     private fun exactFor(v: Double, src: String): String? =
         if (!exactAllowed(src)) null else if (mathDisplay) Calc.exact(v) else Calc.fraction(v)
@@ -1020,7 +1242,7 @@ internal class CalcModel {
         if (angle == AngleMode.Rad || cmplx) return false
         val src = if (done) (if (promptKind == 3 || promptKind == 4) promptExpr else lastExpr) else expr
         val calculus = "∫(" in src || "d/dx(" in src || "lim(" in src
-        val trig = Regex("(?<![h])(a?(sin|cos|tan|cot))\\(").containsMatchIn(src)
+        val trig = trigCall.containsMatchIn(src)
         return calculus && trig
     }
 
@@ -1049,9 +1271,9 @@ internal class CalcModel {
      * comma in gcd(12,18) stays a comma. Spaces inside digit groups (1 000) are thousands separators too.
      */
     private fun tidyPaste(t: String): String {
-        var s = Regex("""(?<![\d.,])\d{1,3}(?:,\d{3})+(?![\d,])""").replace(t) { it.value.replace(",", "") }
-        s = Regex("""(?<![\d.,])\d{1,3}(?: \d{3})+(?![\d,])""").replace(s) { it.value.replace(" ", "") }
-        if ('(' !in s && '.' !in s && s.count { it == ',' } == 1 && Regex("""\d,\d""").containsMatchIn(s)) s = s.replace(',', '.')
+        var s = thousandsComma.replace(t) { it.value.replace(",", "") }
+        s = thousandsSpace.replace(s) { it.value.replace(" ", "") }
+        if ('(' !in s && '.' !in s && s.count { it == ',' } == 1 && digitCommaDigit.containsMatchIn(s)) s = s.replace(',', '.')
         return s
     }
 
@@ -1081,7 +1303,7 @@ internal class CalcModel {
         p["complexText"] = complexText
         p["history"] = history.joinToString("\u0001") { it.first + "\u0002" + it.second }
         p["angle"] = angle.name; p["fmtKind"] = fmt.kind.name; p["fmtDigits"] = fmt.digits.toString()
-        p["mathDisplay"] = mathDisplay.toString(); p["lcd"] = lcd.toString(); p["cmplx"] = cmplx.toString(); p["polar"] = polar.toString(); p["haptics"] = haptics.toString()
+        p["mathDisplay"] = mathDisplay.toString(); p["lcd"] = lcd.toString(); p["cmplx"] = cmplx.toString(); p["polar"] = polar.toString(); p["haptics"] = haptics.toString(); p["showSpeed"] = showSpeed.toString()
         p["shift"] = shift.toString(); p["alpha"] = alpha.toString(); p["second"] = second.toString(); p["hyp"] = hyp.toString()
         p["isBool"] = isBool.toString(); p["flip"] = flip.toString(); p["eng"] = eng.toString(); p["si"] = si.toString(); p["dms"] = dms.toString()
         p["promptKind"] = promptKind.toString(); p["promptExpr"] = promptExpr
@@ -1113,7 +1335,7 @@ internal class CalcModel {
                     (s("fmtDigits").toIntOrNull() ?: 13).coerceIn(1, 15),
                 )
                 m.mathDisplay = b("mathDisplay"); m.lcd = (s("lcd").toIntOrNull() ?: 0).coerceIn(0, LcdThemes.lastIndex)
-                m.cmplx = b("cmplx"); m.polar = b("polar"); m.haptics = s("haptics") != "false"
+                m.cmplx = b("cmplx"); m.polar = b("polar"); m.haptics = s("haptics") != "false"; m.showSpeed = b("showSpeed")
                 m.shift = b("shift"); m.alpha = b("alpha"); m.second = b("second"); m.hyp = b("hyp")
                 m.isBool = b("isBool"); m.flip = b("flip"); m.eng = b("eng"); m.si = b("si"); m.dms = b("dms")
                 m.promptKind = s("promptKind").toIntOrNull() ?: 0; m.promptExpr = s("promptExpr")
@@ -1167,7 +1389,7 @@ internal fun describeKey(k: CalcKeyDef): List<Pair<String, String>> {
         KeyAct.Alpha -> "Next key uses its violet job (letters and extras)"
         KeyAct.Second -> "Switches some keys to Int, Frac, Sign, log₂ and Round"
         KeyAct.Hyp -> "Next trig key is hyperbolic (sinh, cosh, tanh)"
-        else -> "Types " + l.insert.trim()
+        else -> "Types " + l.insert.replace("¦", "").trim()
     }
     val out = ArrayList<Pair<String, String>>()
     out += k.label to what(L(k.label, k.insert, k.act))

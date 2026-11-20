@@ -68,6 +68,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,6 +97,7 @@ import com.godbless.lockin.ui.LockInText
 import com.godbless.lockin.ui.UiGlide
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -125,8 +127,25 @@ internal class PdfDoc(file: File) {
             } finally {
                 first.close()
             }
+            // Every page's own shape, so a cover, a landscape insert or a fold-out does not change height (and move
+            // the page you're on) when it is first drawn. Skipped for enormous books, where it would take too long.
+            if (pageCount in 2..1500) {
+                for (i in 1 until pageCount) {
+                    val pg = runCatching { renderer.openPage(i) }.getOrNull() ?: continue
+                    try {
+                        if (pg.width > 0) ratios[i] = pg.height.toFloat() / pg.width
+                    } finally {
+                        pg.close()
+                    }
+                }
+            }
         }
     }
+
+    // Pages are drawn one at a time anyway (the renderer takes one lock), so they wait here in order. A page that was
+    // scrolled past, or zoomed to another size, while it waited is dropped before it is drawn instead of after.
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val renderQueue = Dispatchers.IO.limitedParallelism(1)
 
     // A sixth of the app's memory, so a sharp zoomed page doesn't push out all the others.
     private val cache = object : LruCache<String, Bitmap>((Runtime.getRuntime().maxMemory() / 6).toInt().coerceIn(32 shl 20, 128 shl 20)) {
@@ -137,9 +156,10 @@ internal class PdfDoc(file: File) {
 
     fun peek(index: Int, widthPx: Int): Bitmap? = cache.get("$index@$widthPx")
 
-    suspend fun bitmap(index: Int, widthPx: Int): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun bitmap(index: Int, widthPx: Int): Bitmap? = withContext(renderQueue) {
         val key = "$index@$widthPx"
         cache.get(key)?.let { return@withContext it }
+        ensureActive()
         val bmp = synchronized(lock) {
             if (closed) null else renderPage(renderer, index, widthPx)
         } ?: return@withContext null
@@ -188,6 +208,26 @@ private val SepiaFilter = ColorFilter.colorMatrix(
 
 private val ToneNames = listOf("Light", "Dark", "Sepia")
 
+/** The reader's own settings that stay between books and visits. */
+internal object ReaderPrefs {
+    private const val PREFS = "reader_prefs"
+    fun tone(context: android.content.Context): Int =
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).getInt("tone", 0).coerceIn(0, 2)
+    fun setTone(context: android.content.Context, tone: Int) {
+        context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).edit().putInt("tone", tone).apply()
+    }
+}
+
+/** Keeps a selection across a rotation. */
+private val SelSaver = Saver<PageSel?, ArrayList<Float>>(
+    save = { s -> if (s == null) arrayListOf() else arrayListOf(s.page.toFloat(), s.l, s.t, s.r, s.b) },
+    restore = { v -> if (v.size == 5) PageSel(v[0].toInt(), v[1], v[2], v[3], v[4]) else null },
+)
+
+/** A slide or glide of [ms], or none at all when Reduce motion is on. */
+private fun <T> glide(ms: Int): androidx.compose.animation.core.FiniteAnimationSpec<T> =
+    if (com.godbless.lockin.ui.MotionState.reduced) androidx.compose.animation.core.snap() else tween(ms, easing = UiGlide)
+
 /**
  * Reads a textbook. Pages scroll down the screen, pinch with two fingers to zoom (then slide sideways
  * to pan), and the bar at the bottom jumps to a page, flips the pages dark, or makes a flashcard from
@@ -209,10 +249,20 @@ internal fun ReaderScreen(
     }
     DisposableEffect(bookId) { onDispose { doc?.close() } }
 
-    var zoom by remember { mutableFloatStateOf(1f) }
-    // 0 light, 1 dark, 2 sepia.
-    var tone by rememberSaveable { mutableIntStateOf(0) }
+    var zoom by rememberSaveable { mutableFloatStateOf(1f) }
+    // 0 light, 1 dark, 2 sepia. Remembered between books and visits.
+    val prefsContext = androidx.compose.ui.platform.LocalContext.current
+    var tone by rememberSaveable { mutableIntStateOf(ReaderPrefs.tone(prefsContext)) }
     val dark = tone == 1
+    // The clock and battery icons turn dark on a light or sepia page and light on a dark one, whatever the app's theme is.
+    val barView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(tone) {
+        val window = (barView.context as? android.app.Activity)?.window
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, barView) }
+        val before = controller?.isAppearanceLightStatusBars
+        controller?.isAppearanceLightStatusBars = tone != 1
+        onDispose { if (controller != null && before != null) controller.isAppearanceLightStatusBars = before }
+    }
     // Bars hide while you read down the page and come back when you read up, or tap.
     var chrome by remember { mutableStateOf(true) }
     var chip by remember { mutableStateOf(false) }
@@ -227,7 +277,7 @@ internal fun ReaderScreen(
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     // Explaining a word or sentence: what's selected on the page, whether a finger is still dragging it, select mode
     // (from the Select button: one finger draws a selection instead of scrolling), and the open explanation.
-    var sel by remember(bookId) { mutableStateOf<PageSel?>(null) }
+    var sel by rememberSaveable(bookId, stateSaver = SelSaver) { mutableStateOf<PageSel?>(null) }
     var selecting by remember { mutableStateOf(false) }
     var armed by remember { mutableStateOf(false) }
     var preparing by remember { mutableStateOf(false) }
@@ -306,13 +356,14 @@ internal fun ReaderScreen(
                 info.visibleItemsInfo.firstOrNull { it.index == s.page }?.let { item ->
                     val y = item.offset - info.viewportStartOffset + s.t * item.size
                     val target = with(readerDensity) { (topPad + 20.dp).toPx() }
-                    runCatching { list.animateScrollBy(y - target, tween(380, easing = UiGlide)) }
+                    runCatching { list.animateScrollBy(y - target, glide(380)) }
                 }
             }
         }
     }
 
-    Box(Modifier.fillMaxSize().background(if (dark) Color.Black else if (tone == 2) Color(0xFF3A3328) else LockInColors.Graphite)) {
+    // What shows between the pages: a soft grey (or a deeper cream, or a dim grey) so the gap reads as paper edges, not a black bar.
+    Box(Modifier.fillMaxSize().background(if (doc == null) LockInColors.Ink else if (dark) Color(0xFF1B1B1B) else if (tone == 2) Color(0xFFD9CBA8) else Color(0xFFD6D6D6))) {
         val d = doc
         when {
             failed || book == null -> Message("Couldn't open this book.", onBack)
@@ -426,6 +477,8 @@ internal fun ReaderScreen(
                             // (select words), a selection handle, or select mode. Ordinary one-finger scrolling still works.
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                // A finger put down to stop a fling and left there is not a long press.
+                                val stopping = list.isScrollInProgress
                                 val grab = handleAt(down.position)
                                 if (grab != 0) {
                                     // Drag a handle to grow or shrink the selection.
@@ -468,7 +521,7 @@ internal fun ReaderScreen(
                                 }
                                 when (outcome) {
                                     // Held still: pick out the word under the finger, then follow it.
-                                    null -> if (passage == null && !aiOpen && !making && !aiQuiz) dragSelect(down.position)
+                                    null -> if (!stopping && passage == null && !aiOpen && !making && !aiQuiz) dragSelect(down.position)
                                     1 -> do {
                                         val ev = awaitPointerEvent(PointerEventPass.Initial)
                                         pinch(ev)
@@ -484,7 +537,7 @@ internal fun ReaderScreen(
                                     scope.launch {
                                         val from = zoom
                                         val to = if (from > 1.2f) 1f else 2.5f
-                                        animate(from, to, animationSpec = tween(280, easing = UiGlide)) { v, _ -> zoomTo(v, p.x, p.y) }
+                                        animate(from, to, animationSpec = glide(280)) { v, _ -> zoomTo(v, p.x, p.y) }
                                     }
                                 },
                                 onTap = {
@@ -501,7 +554,7 @@ internal fun ReaderScreen(
                     LazyColumn(
                         state = list,
                         modifier = Modifier.padding(start = leftPad).width(pageW),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(top = topPad + 64.dp, bottom = 140.dp),
                     ) {
                         items(d.pageCount) { index ->
@@ -516,7 +569,7 @@ internal fun ReaderScreen(
                 androidx.compose.animation.AnimatedVisibility(
                     visible = sel != null && !selecting && passage == null,
                     enter = androidx.compose.animation.scaleIn(spring(dampingRatio = 0.7f, stiffness = 500f), initialScale = 0.6f),
-                    exit = androidx.compose.animation.scaleOut(tween(140, easing = UiGlide), targetScale = 0.6f),
+                    exit = androidx.compose.animation.scaleOut(glide(140), targetScale = 0.6f),
                 ) {
                     SelectionBar(
                         rect = { shownRect() },
@@ -535,14 +588,15 @@ internal fun ReaderScreen(
         val titleColor = if (tone == 1) Color(0xFFF2F2F2) else Color(0xFF1C1A16)
         AnimatedVisibility(
             visible = chrome || doc == null,
-            enter = slideInVertically(tween(240, easing = UiGlide)) { -it },
-            exit = slideOutVertically(tween(220, easing = UiGlide)) { -it },
+            enter = slideInVertically(glide(240)) { -it },
+            exit = slideOutVertically(glide(220)) { -it },
         ) {
+        // A solid bar in the paper's colour with a hairline under it: nothing from the page shows through the title.
+        Column(Modifier.fillMaxWidth().background(fade)) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(0f to fade.copy(alpha = 0.96f), 0.62f to fade.copy(alpha = 0.88f), 1f to fade.copy(alpha = 0f)))
-                .padding(start = 16.dp, end = 16.dp, top = topPad, bottom = 16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = topPad, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton(onBack)
@@ -560,7 +614,7 @@ internal fun ReaderScreen(
                     .clip(CircleShape)
                     .background(LockInColors.Slate)
                     .border(1.dp, LockInColors.Graphite, CircleShape)
-                    .clickable(role = Role.Button) { tone = (tone + 1) % 3 }
+                    .clickable(role = Role.Button) { tone = (tone + 1) % 3; ReaderPrefs.setTone(prefsContext, tone) }
                     .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -574,14 +628,16 @@ internal fun ReaderScreen(
                 Text(ToneNames[tone], style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 13.sp), modifier = Modifier.padding(start = 8.dp))
             }
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(if (tone == 1) Color(0x33FFFFFF) else Color(0x1F000000)))
+        }
         }
 
         // The page number, while you scroll and the bars are away.
         AnimatedVisibility(
             visible = chip && !chrome && !jump && doc != null,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = topPad),
-            enter = slideInVertically(tween(200, easing = UiGlide)) { -it * 2 },
-            exit = slideOutVertically(tween(200, easing = UiGlide)) { -it * 2 },
+            enter = slideInVertically(glide(200)) { -it * 2 },
+            exit = slideOutVertically(glide(200)) { -it * 2 },
         ) {
             Text(
                 "${page + 1} / ${book?.pages ?: 0}",
@@ -599,16 +655,16 @@ internal fun ReaderScreen(
             AnimatedVisibility(
                 visible = (chrome || jump) && sel == null && !armed,
                 modifier = Modifier.align(Alignment.BottomCenter),
-                enter = slideInVertically(tween(240, easing = UiGlide)) { it },
-                exit = slideOutVertically(tween(220, easing = UiGlide)) { it },
+                enter = slideInVertically(glide(240)) { it },
+                exit = slideOutVertically(glide(220)) { it },
             ) {
             Column(
                 Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 14.dp),
             ) {
                 AnimatedVisibility(
                     visible = jump,
-                    enter = slideInVertically(tween(260, easing = UiGlide)) { it },
-                    exit = slideOutVertically(tween(220, easing = UiGlide)) { it },
+                    enter = slideInVertically(glide(260)) { it },
+                    exit = slideOutVertically(glide(220)) { it },
                 ) {
                     val shape = RoundedCornerShape(24.dp)
                     Column(
@@ -671,16 +727,16 @@ internal fun ReaderScreen(
         AnimatedVisibility(
             visible = armed,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = topPad + 8.dp),
-            enter = slideInVertically(tween(240, easing = UiGlide)) { -it * 2 },
-            exit = slideOutVertically(tween(200, easing = UiGlide)) { -it * 2 },
+            enter = slideInVertically(glide(240)) { -it * 2 },
+            exit = slideOutVertically(glide(200)) { -it * 2 },
         ) {
             SelectHint("Drag over a word or sentence", onCancel = { armed = false })
         }
         AnimatedVisibility(
             visible = showTip && doc != null && chrome && !armed && sel == null && passage == null && !aiOpen && !making,
             modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 92.dp),
-            enter = slideInVertically(tween(300, easing = UiGlide)) { it * 2 },
-            exit = slideOutVertically(tween(220, easing = UiGlide)) { it * 2 },
+            enter = slideInVertically(glide(300)) { it * 2 },
+            exit = slideOutVertically(glide(220)) { it * 2 },
         ) {
             val shape = RoundedCornerShape(22.dp)
             Row(
@@ -710,8 +766,8 @@ internal fun ReaderScreen(
         AnimatedVisibility(
             visible = passage != null,
             modifier = Modifier.align(if (wideReader) Alignment.CenterEnd else Alignment.BottomCenter),
-            enter = if (wideReader) androidx.compose.animation.slideInHorizontally(tween(320, easing = UiGlide)) { it } else slideInVertically(tween(320, easing = UiGlide)) { it },
-            exit = if (wideReader) androidx.compose.animation.slideOutHorizontally(tween(260, easing = UiGlide)) { it } else slideOutVertically(tween(260, easing = UiGlide)) { it },
+            enter = if (wideReader) androidx.compose.animation.slideInHorizontally(glide(320)) { it } else slideInVertically(glide(320)) { it },
+            exit = if (wideReader) androidx.compose.animation.slideOutHorizontally(glide(260)) { it } else slideOutVertically(glide(260)) { it },
         ) {
             // Keeps showing the last one while it slides away.
             var shown by remember { mutableStateOf<PassageArgs?>(null) }
@@ -725,7 +781,7 @@ internal fun ReaderScreen(
         // The page dims behind the sheets, and a tap on the dim closes them.
         val dim by animateFloatAsState(
             if (aiOpen || making) 1f else 0f,
-            tween(260, easing = UiGlide),
+            glide(260),
             label = "dim",
         )
         if (dim > 0.01f) {
@@ -742,8 +798,8 @@ internal fun ReaderScreen(
         AnimatedVisibility(
             visible = aiOpen,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(tween(320, easing = UiGlide)) { it },
-            exit = slideOutVertically(tween(280, easing = UiGlide)) { it },
+            enter = slideInVertically(glide(320)) { it },
+            exit = slideOutVertically(glide(280)) { it },
         ) {
             ReaderAiSheet(
                 store = store,
@@ -759,8 +815,8 @@ internal fun ReaderScreen(
         // The quiz on what you read in this book (this page included), over the reader.
         AnimatedVisibility(
             visible = aiQuiz,
-            enter = slideInVertically(tween(320, easing = UiGlide)) { it },
-            exit = slideOutVertically(tween(280, easing = UiGlide)) { it },
+            enter = slideInVertically(glide(320)) { it },
+            exit = slideOutVertically(glide(280)) { it },
         ) {
             val source = remember {
                 (store.reads.filter { it.book == bookId }.map { it.page } + page).distinct().takeLast(12).map { bookId to it }
@@ -778,8 +834,8 @@ internal fun ReaderScreen(
         AnimatedVisibility(
             visible = making,
             modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(tween(320, easing = UiGlide)) { it },
-            exit = slideOutVertically(tween(280, easing = UiGlide)) { it },
+            enter = slideInVertically(glide(320)) { it },
+            exit = slideOutVertically(glide(280)) { it },
         ) {
             CardEditor(
                 store = store,

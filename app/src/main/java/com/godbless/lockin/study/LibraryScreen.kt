@@ -242,7 +242,7 @@ internal fun LibraryScreen(
     // The books on show: all of them except one that has been removed and is waiting out its Undo.
     val books = store.books.filter { it.id != removed?.id }
     // When each book was last read (for "Recent" and for the book to continue).
-    val lastRead = remember(store.reads.size, store.books.size) {
+    val lastRead = remember(store.reads.lastOrNull()?.at, store.reads.size, store.books.size) {
         val m = HashMap<String, Long>()
         store.reads.forEach { r -> if ((m[r.book] ?: 0L) < r.at) m[r.book] = r.at }
         m
@@ -257,7 +257,7 @@ internal fun LibraryScreen(
                 // A book just added counts as recent, so it leads the shelf instead of hiding behind the ones you read.
                 BookSort.Recent -> list.sortedByDescending { maxOf(lastRead[it.id] ?: 0L, it.added) }
                 BookSort.Title -> list.sortedBy { prettyTitle(it.title).lowercase() }
-                BookSort.Progress -> list.sortedByDescending { readFraction(it) }
+                BookSort.Progress -> list.sortedByDescending { store.readFraction(it) }
             }
         }
 
@@ -523,7 +523,6 @@ private fun BoxScope.ShelfToast(note: ShelfNote?, onDismiss: () -> Unit) {
 
 private fun Modifier.fillInk(): Modifier = this.fillMaxSize().background(LockInColors.Ink)
 
-private fun readFraction(b: Textbook): Float = if (b.pages > 1) ((b.lastPage + 1f) / b.pages).coerceIn(0f, 1f) else 0f
 
 @Composable
 private fun rememberCover(store: StudyStore, id: String) = remember(id) {
@@ -539,7 +538,7 @@ private fun rememberCover(store: StudyStore, id: String) = remember(id) {
 private fun ContinueCard(store: StudyStore, book: Textbook, onOpen: () -> Unit) {
     val shape = RoundedCornerShape(26.dp)
     val cover = rememberCover(store, book.id)
-    val frac = readFraction(book)
+    val frac = store.readFraction(book)
     val shownFrac by animateFloatAsState(frac, spring(dampingRatio = 0.85f, stiffness = 80f), label = "continue")
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -593,7 +592,7 @@ private fun ContinueCard(store: StudyStore, book: Textbook, onOpen: () -> Unit) 
 private fun LibraryStats(store: StudyStore, books: List<Textbook>) {
     val shape = RoundedCornerShape(24.dp)
     val totalPages = books.sumOf { it.pages }
-    val readPages = books.sumOf { (it.lastPage + 1).coerceIn(0, it.pages) }
+    val readPages = books.sumOf { store.readCount(it.id) }
     val fill by animateFloatAsState(
         if (totalPages > 0) readPages.toFloat() / totalPages else 0f,
         spring(dampingRatio = 0.85f, stiffness = 70f),
@@ -920,14 +919,14 @@ private fun BookTile(
 ) {
     val haptic = LocalHapticFeedback.current
     val cover = rememberCover(store, book.id)
-    val frac = readFraction(book)
+    val frac = store.readFraction(book)
     val shown by animateFloatAsState(frac, spring(dampingRatio = 0.85f, stiffness = 90f), label = "tile-progress")
     val cards = store.cards.count { it.book == book.id }
     val opened = book.lastPage > 0 || store.reads.any { it.book == book.id }
     val exam = store.daysToExam(book)
     val badge: Pair<String, Boolean>? = when {
         exam != null && exam <= 14 -> (if (exam == 0) "Exam today" else "Exam in ${exam}d") to true
-        book.pages > 1 && book.lastPage + 1 >= book.pages -> "Finished" to false
+        store.finished(book) -> "Finished" to false
         !opened -> "New" to false
         else -> null
     }
@@ -1014,17 +1013,18 @@ private fun BookTile(
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }
+            // The touch area is 48 dp; the round button drawn in it is 32.
             Box(
                 Modifier
                     .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .size(32.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.55f))
                     .clickable(role = Role.Button, onClick = onActions),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("⋯", style = LockInText.Label.copy(color = Color.White, fontSize = 16.sp, lineHeight = 16.sp))
+                Box(Modifier.size(32.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                    Text("⋯", style = LockInText.Label.copy(color = Color.White, fontSize = 16.sp, lineHeight = 16.sp))
+                }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -1158,7 +1158,7 @@ private fun BookActions(
             Column(Modifier.weight(1f).padding(start = 14.dp)) {
                 Text(prettyTitle(book.title), style = LockInText.Label.copy(color = LockInColors.Snow, fontSize = 16.sp, fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${book.pages} pages · ${(readFraction(book) * 100).toInt()}% read" + (if (cards > 0) " · $cards cards" else "") + (if (saved > 0) " · $saved AI" else ""),
+                    "${book.pages} pages · ${(store.readFraction(book) * 100).toInt()}% read" + (if (cards > 0) " · $cards cards" else "") + (if (saved > 0) " · $saved AI" else ""),
                     style = LockInText.Small.copy(color = LockInColors.Mist),
                 )
             }

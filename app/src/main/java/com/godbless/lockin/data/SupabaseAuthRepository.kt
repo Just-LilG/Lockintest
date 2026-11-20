@@ -31,6 +31,10 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
     private var session: Session? = null
     private val renewLock = Mutex()
 
+    /** True after an offline start: the access token in [session] is the last one remembered and may have expired. */
+    @Volatile private var stale = false
+    @Volatile private var lastStaleTry = 0L
+
     private val linkCounter = MutableStateFlow(0)
     override val linkSignIns: StateFlow<Int> = linkCounter
 
@@ -54,14 +58,17 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
     // ---- Plumbing ---------------------------------------------------------------------------
 
     /** Returns null when the phone could not reach Supabase at all. */
-    private suspend fun request(method: String, path: String, body: JSONObject? = null, bearer: String? = null): Resp? =
+    private suspend fun request(
+        method: String, path: String, body: JSONObject? = null, bearer: String? = null,
+        connectMs: Int = 12_000, readMs: Int = 20_000,
+    ): Resp? =
         withContext(Dispatchers.IO) {
             var conn: HttpURLConnection? = null
             try {
                 conn = URL(BuildConfig.SUPABASE_URL + path).openConnection() as HttpURLConnection
                 conn.requestMethod = method
-                conn.connectTimeout = 12_000
-                conn.readTimeout = 20_000
+                conn.connectTimeout = connectMs
+                conn.readTimeout = readMs
                 conn.setRequestProperty("apikey", BuildConfig.SUPABASE_KEY)
                 conn.setRequestProperty("Content-Type", "application/json")
                 if (bearer != null) conn.setRequestProperty("Authorization", "Bearer $bearer")
@@ -121,12 +128,15 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
 
     private fun finish(s: Session, remember: Boolean): AuthResult {
         session = s
+        stale = false
         if (remember) {
             store.put(K_REFRESH, s.refresh)
+            store.put(K_ACCESS, s.access)
             store.put(K_NAME, s.name)
             store.put(K_EMAIL, s.email)
         } else {
             store.remove(K_REFRESH)
+            store.remove(K_ACCESS)
             store.remove(K_NAME)
             store.remove(K_EMAIL)
             store.remove(K_BIO)
@@ -176,18 +186,30 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
 
     override suspend fun accessToken(forceRefresh: Boolean): String? {
         val before = session ?: return null
-        if (!forceRefresh) return before.access
+        // After an offline start the access token on hand is an old one. Try to renew it on the first use and then at
+        // most every 30 s (a failed try costs a few seconds offline), so calls that never retry on a 401 (the AI, the
+        // live channel) get a working token as soon as the phone is back online.
+        val staleTry = stale && System.currentTimeMillis() - lastStaleTry > 30_000
+        if (!forceRefresh && !staleTry) return before.access
         return renewLock.withLock {
             val now = session ?: return@withLock null
             // Someone else may have renewed while we waited for the lock.
             if (now.access != before.access) return@withLock now.access
-            val r = request("POST", "/auth/v1/token?grant_type=refresh_token", JSONObject().put("refresh_token", now.refresh))
-                ?: return@withLock null
-            if (!r.ok) return@withLock null
-            val fresh = r.json()?.let { parseSession(it, now.email, now.name) } ?: return@withLock null
+            if (!forceRefresh && System.currentTimeMillis() - lastStaleTry <= 30_000) return@withLock now.access
+            if (!forceRefresh) lastStaleTry = System.currentTimeMillis()
+            val r = request(
+                "POST", "/auth/v1/token?grant_type=refresh_token", JSONObject().put("refresh_token", now.refresh),
+                connectMs = if (forceRefresh) 12_000 else 4_000, readMs = if (forceRefresh) 20_000 else 8_000,
+            ) ?: return@withLock if (forceRefresh) null else now.access
+            if (!r.ok) return@withLock if (forceRefresh) null else now.access
+            val fresh = r.json()?.let { parseSession(it, now.email, now.name) } ?: return@withLock if (forceRefresh) null else now.access
             session = fresh
+            stale = false
             // Refresh tokens are single use, so a remembered one has to be replaced.
-            if (store.get(K_REFRESH) != null) store.put(K_REFRESH, fresh.refresh)
+            if (store.get(K_REFRESH) != null) {
+                store.put(K_REFRESH, fresh.refresh)
+                store.put(K_ACCESS, fresh.access)
+            }
             fresh.access
         }
     }
@@ -195,7 +217,9 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
     override fun signOut() {
         val s = session
         session = null
+        stale = false
         store.remove(K_REFRESH)
+        store.remove(K_ACCESS)
         store.remove(K_NAME)
         store.remove(K_EMAIL)
         store.remove(K_BIO)
@@ -297,9 +321,35 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
         // The background service may have signed back in already. A refresh token works once, so don't use it twice.
         session?.let { return@withLock AuthResult.SignedIn }
         val refresh = store.get(K_REFRESH) ?: return@withLock AuthResult.Failure("Sign in again to continue.")
-        val r = request("POST", "/auth/v1/token?grant_type=refresh_token", JSONObject().put("refresh_token", refresh)) ?: return@withLock offline
+        val r = request(
+            "POST", "/auth/v1/token?grant_type=refresh_token", JSONObject().put("refresh_token", refresh),
+            connectMs = 6_000, readMs = 10_000,
+        )
+        if (r == null) {
+            // No connection. Someone who was signed in on this phone still gets in: the calculator, textbooks and
+            // quiz need no server. The refresh token was NOT used (it works once), so the first call that needs the
+            // server finds the old access token expired (401) and renews it then (see accessToken(forceRefresh)).
+            // Without a remembered access token (signed in before this was added) there is nothing to open with.
+            val access = store.get(K_ACCESS)
+            if (access.isNullOrEmpty()) return@withLock offline
+            session = Session(access, refresh, store.get(K_NAME).orEmpty(), store.get(K_EMAIL).orEmpty())
+            stale = true
+            lastStaleTry = System.currentTimeMillis()
+            return@withLock AuthResult.SignedIn
+        }
         if (!r.ok) {
+            // The server answered and said no (the token was revoked or has already been used): that is a real sign-out.
+            // A 5xx is the server having a bad moment, not a verdict on the token, so it is treated like no connection.
+            if (r.code >= 500) {
+                val access = store.get(K_ACCESS)
+                if (access.isNullOrEmpty()) return@withLock offline
+                session = Session(access, refresh, store.get(K_NAME).orEmpty(), store.get(K_EMAIL).orEmpty())
+                stale = true
+                lastStaleTry = System.currentTimeMillis()
+                return@withLock AuthResult.SignedIn
+            }
             store.remove(K_REFRESH)
+            store.remove(K_ACCESS)
             return@withLock AuthResult.Failure("Your session ended. Sign in again.")
         }
         val email = store.get(K_EMAIL).orEmpty()
@@ -385,6 +435,7 @@ class SupabaseAuthRepository(context: Context) : AuthRepository {
 
     private companion object {
         const val K_REFRESH = "refresh_token"
+        const val K_ACCESS = "access_token_last"
         const val K_NAME = "user_name"
         const val K_EMAIL = "user_email"
         const val K_BIO = "biometric"

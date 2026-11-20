@@ -114,6 +114,20 @@ class SettingsGuardService : AccessibilityService() {
         }
         val pkg = e.packageName?.toString() ?: return
         if (e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && pkg != packageName) topPkg = pkg
+        // During a partner's lock, Settings (and the phone makers' permission and security screens) are simply closed.
+        // No reading of the page, no English phrases: where a switch lives and what it is called differs on every
+        // phone (HyperOS says "pop-up windows", for one), so deciding "is this the page that turns LockIn off?" is what
+        // let the device admin and "display over other apps" be switched off. Your partner's yes (an open window) still lets it through.
+        if (pkg != packageName && settingsDuringLock(pkg)) {
+            val t = SystemClock.uptimeMillis()
+            if (t - lastLockHome > 250L) {
+                lastLockHome = t
+                showShield()
+                performGlobalAction(GLOBAL_ACTION_HOME)
+                LockService.nudge()
+            }
+            return
+        }
         if (pkg == packageName || !watched(pkg)) return
         if (!Protection.on(this)) return
         val opened = e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
@@ -143,6 +157,21 @@ class SettingsGuardService : AccessibilityService() {
     }
 
     // ----- Looking at the screen -----
+
+    private var lastLockHome = 0L
+
+    /** A Settings-like screen coming up while a partner's lock holds, with no yes from the partner open for it. */
+    private fun settingsDuringLock(pkg: String): Boolean {
+        val p = pkg.lowercase()
+        if (!((watched(pkg) && p != "android") || "lbe.security" in p)) return false
+        val l = LocalLock(this)
+        if (!l.active || l.id <= 0L) return false
+        if (AllowedStore(this).load().any { it.pkg == pkg }) return false
+        for (k in listOf(Protection.Admin, Protection.Uninstall, Protection.Overlay, Protection.Usage, Protection.Guard, Protection.Other)) {
+            if (Protection.isOpen(this, k)) return false
+        }
+        return true
+    }
 
     private fun watched(pkg: String): Boolean {
         val p = pkg.lowercase()
@@ -470,7 +499,7 @@ class SettingsGuardService : AccessibilityService() {
             val time = label("", 54f, accent(), bold = true)
             col.addView(title, lp())
             col.addView(time, lp(14f))
-            col.addView(label("This phone is locked until the time runs out. Switch \"display over other apps\" back on for LockIn to get the full cover.", 14f, 0xFFA6A6AE.toInt()), lp(14f))
+            col.addView(label("This phone is locked until the time runs out. Close the small window or press Home to get back to LockIn.", 14f, 0xFFA6A6AE.toInt()), lp(14f))
             val open = button("Open LockIn", accent(), onAccent())
             open.setOnClickListener {
                 runCatching { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }

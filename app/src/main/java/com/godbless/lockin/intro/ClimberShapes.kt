@@ -46,6 +46,13 @@ internal object Tone {
     const val EYE_W = 35
     const val CHEEK = 36
     const val LIP = 37
+    const val SKIN_HI = 38
+    const val SKIN_DEEP = 39
+    const val IRIS = 40
+    const val LENS_HI = 41
+    const val HAIR_DEEP = 42
+    const val HELMET_RIM = 43
+    const val IRIS_HI = 44
 }
 
 /** The colour of each [Tone], as ARGB. (The painter swaps ACCENT for the theme's accent.) */
@@ -88,11 +95,18 @@ internal val ClimberPalette = intArrayOf(
     0xFFF6F2EE.toInt(), // EYE_W
     0xFFB86D55.toInt(), // CHEEK (warm cheek highlight)
     0xFF6E302B.toInt(), // LIP
+    0xFFB97753.toInt(), // SKIN_HI (lit skin: cheekbone, nose tip)
+    0xFF5B2B22.toInt(), // SKIN_DEEP (neck under the jaw)
+    0xFF4A2A18.toInt(), // IRIS
+    0xFF3B5F95.toInt(), // LENS_HI (goggle reflection)
+    0xFF120B08.toInt(), // HAIR_DEEP
+    0xFFB9BACB.toInt(), // HELMET_RIM (band along the lower edge)
+    0xFF8D5E36.toInt(), // IRIS_HI (lighter lower half of the iris)
 )
 
 /** One drawing primitive in scene (world) coordinates. */
 internal class Prim(
-    /** 0 = filled circle [x, y, r]; 1 = filled polygon [x0, y0, x1, y1 ...]; 2 = round-capped polyline. */
+    /** 0 = filled circle [x, y, r]; 1 = filled polygon [x0, y0, x1, y1 ...]; 2 = round-capped polyline; 3 = soft disc [x, y, r] that fades to nothing at its edge (blush, light). */
     val kind: Int,
     val tone: Int,
     val pts: FloatArray,
@@ -151,14 +165,32 @@ internal object ClimberShapes {
         val fem = c.female
         val lk = if (fem) 0.94f else 1f
         val ak = if (fem) 0.92f else 1f
-        /** Half-width factor of the torso at height [b]: narrower overall and cinched at the waist. */
-        fun wf(b: Float): Float {
-            if (!fem) return 1f
-            val q = (b - 28f) / 10f
-            return 0.9f * (1f - 0.11f * kotlin.math.exp(-q * q))
+        val thigh = 11.4f * (if (fem) 1.12f else lk)
+        // Her torso is shaped by two width curves (heights in [femB]): the chest side swells into a bust and nips in at the
+        // waist, the back side swells into the hips and seat. A man's torso is left as it was.
+        val femB = floatArrayOf(-3f, 6f, 14f, 28f, 38f, 48f, 56f, 66f)
+        val femFront = floatArrayOf(0.95f, 0.98f, 0.92f, 0.70f, 0.96f, 1.32f, 0.98f, 0.88f)
+        val femBack = floatArrayOf(1.18f, 1.26f, 1.05f, 0.74f, 0.80f, 0.84f, 0.86f, 0.88f)
+        fun curveAt(v: FloatArray, b: Float): Float {
+            if (b <= femB[0]) return v[0]
+            for (i in 0 until femB.size - 1) {
+                if (b <= femB[i + 1]) {
+                    val t = (b - femB[i]) / (femB[i + 1] - femB[i])
+                    val e = t * t * (3f - 2f * t)
+                    return v[i] + (v[i + 1] - v[i]) * e
+                }
+            }
+            return v[v.size - 1]
         }
+        /** Width factor of the torso at height [b] on the side [a] is on. */
+        fun wf(a: Float, b: Float): Float = if (!fem) 1f else curveAt(if (a >= 0f) femFront else femBack, b)
         /** Like [body] but scaled by the torso's width at that height. */
-        fun tb(a: Float, b: Float) = body(a * wf(b), b)
+        fun tb(a: Float, b: Float) = body(a * wf(a, b), b)
+        fun wflat(vararg q: Pt): FloatArray {
+            val o = FloatArray(q.size * 2)
+            for (i in q.indices) { o[2 * i] = wx(q[i]); o[2 * i + 1] = q[i].y }
+            return o
+        }
 
         fun circle(x: Float, y: Float, r: Float, tone: Int) {
             out.prims.add(Prim(0, Tone.INK, floatArrayOf(x, y, r + HALO)))
@@ -320,7 +352,7 @@ internal object ClimberShapes {
         fun leg(hipJoint: Pt, knee: Pt, ankle: Pt, pitch: Float, tone: Int, shade: Int, boot: Int, near: Boolean) {
             val hxw = wx(hipJoint); val kxw = wx(knee); val axw = wx(ankle)
             // Thigh and shin, fuller where the muscle is, narrowing to the knee and the ankle.
-            limb(hipJoint, 11.4f * lk, knee, 8.6f * lk, tone)
+            limb(hipJoint, thigh, knee, 8.6f * lk, tone)
             limb(knee, 8.6f * lk, ankle, 6.2f * lk, tone)
             // The calf bulges a little below the knee.
             run {
@@ -330,10 +362,10 @@ internal object ClimberShapes {
             }
             if (near) {
                 // Thigh and shin in shade underneath, lit along the top, so the leg reads as round.
-                limbForm(hipJoint, 11.4f * lk, knee, 8.6f * lk, Tone.PANTS_DEEP, Tone.PANTS_HI)
+                limbForm(hipJoint, thigh, knee, 8.6f * lk, Tone.PANTS_DEEP, Tone.PANTS_HI)
                 limbForm(knee, 8.6f * lk, ankle, 6.2f * lk, Tone.PANTS_DEEP, Tone.PANTS_HI, 0f, 0.8f)
                 // A harness leg loop that goes round the top of the thigh.
-                wrapBand(hxw, hipJoint.y, 11.4f * lk, kxw, knee.y, 8.6f * lk, 0.30f, 3.0f, Tone.GEAR)
+                wrapBand(hxw, hipJoint.y, thigh, kxw, knee.y, 8.6f * lk, 0.30f, 3.0f, Tone.GEAR)
             }
             // Knee pad, a little forward of the joint.
             run {
@@ -463,9 +495,26 @@ internal object ClimberShapes {
             dot(wx(h2), h2.y, 4.2f, Tone.HOOD)
         }
 
+        // ---- Her seat and hips: trousers rounding out behind and below the jacket hem ----
+        if (fem) {
+            blob(
+                wflat(body(8f, -2f), body(-6f, 0f), body(-15.5f, -3f), body(-18.5f, -9f), body(-16f, -15.5f), body(-8f, -19f), body(3f, -17.5f), body(9f, -10f)),
+                Tone.PANTS,
+            )
+            blob(
+                wflat(body(-9f, -8f), body(-16.8f, -6f), body(-17.4f, -11f), body(-14.5f, -15.5f), body(-9f, -17.8f), body(-5f, -13f)),
+                Tone.PANTS_SHADE, halo = 0f,
+            )
+        }
+
         // ---- Torso: a puffy jacket, narrow at the waist and full at the chest ----
         run {
-            val pts = arrayOf(
+            val pts = if (fem) arrayOf(
+                tb(12.4f, -3f), tb(13.2f, 5f), tb(13.6f, 12f), tb(12.2f, 28f), tb(13.6f, 40f), tb(14.8f, 47f), tb(13.6f, 54f), tb(13.2f, 60f),
+                tb(0f, 66f),
+                tb(-12.4f, 60f), tb(-13.2f, 54f), tb(-13.6f, 46f), tb(-11.6f, 28f), tb(-12.8f, 12f), tb(-13.2f, 5f), tb(-12.4f, -3f),
+                tb(0f, -6f),
+            ) else arrayOf(
                 tb(12.4f, -3f), tb(13.6f, 12f), tb(12.2f, 28f), tb(14.8f, 46f), tb(13.2f, 60f),
                 tb(0f, 66f),
                 tb(-12.4f, 60f), tb(-13.6f, 46f), tb(-11.6f, 28f), tb(-12.8f, 12f), tb(-12.2f, -3f),
@@ -526,13 +575,24 @@ internal object ClimberShapes {
             // Reflective shoulder tab catches the light without breaking the dark silhouette.
             val tabA = tb(-9.8f, 54f); val tabB = tb(-5.5f, 57f)
             stroke(Tone.SHINE, 1.5f, wx(tabA), tabA.y, wx(tabB), tabB.y)
+            if (fem) {
+                // The bust: a shaded underside that follows the curve, and a soft light on top of it, so the chest reads
+                // as a form under the jacket.
+                blob(
+                    wflat(tb(12.6f, 38.5f), tb(14.6f, 42.5f), tb(14.8f, 46.5f), tb(11.8f, 46f), tb(9.4f, 43f), tb(9.2f, 39.5f)),
+                    Tone.JACKET_DEEP, halo = 0f,
+                )
+                val bl = tb(12.6f, 51.5f)
+                out.prims.add(Prim(3, Tone.SHINE, floatArrayOf(wx(bl), bl.y, 5.2f)))
+            }
             // The hem.
             val m1 = tb(-12.6f, -1f); val m2 = tb(12.8f, -1f)
             stroke(Tone.GEAR, 3.6f, wx(m1), m1.y, wx(m2), m2.y)
         }
 
         // ---- Harness: waist belt and shoulder strap ----
-        val b1 = Pt(p.hip.x + tx * 6f - cnx * 13f, p.hip.y + ty * 6f - cny * 13f)
+        val beltBack = if (fem) 16f else 13f
+        val b1 = Pt(p.hip.x + tx * 6f - cnx * beltBack, p.hip.y + ty * 6f - cny * beltBack)
         val b2 = Pt(p.hip.x + tx * 6f + cnx * 13f, p.hip.y + ty * 6f + cny * 13f)
         stroke(Tone.GEAR, 5.5f, wx(b1), b1.y, wx(b2), b2.y)
         // The buckle and a carabiner on the belt.
@@ -554,6 +614,8 @@ internal object ClimberShapes {
         leg(p.hipA, p.kneeA, p.ankleA, p.pitchA, Tone.PANTS, Tone.PANTS_SHADE, Tone.BOOT, near = true)
 
         // ---- Head: neck, face, helmet and goggles ----
+        // The head is drawn as one smooth profile (cranium, brow, nose, lips, chin, jaw) a touch larger than the rig's
+        // head circle, so the figure reads chunky and friendly instead of a ball on a stalk.
         val hx = wx(p.head)
         val hy = p.head.y
         val up = atan2(p.head.x - p.shoulder.x, -(p.head.y - p.shoulder.y)) // angle from vertical
@@ -563,162 +625,185 @@ internal object ClimberShapes {
         val fx = cos(up) * c.dir
         val fy = sin(up)
         val sxw = wx(p.shoulder)
-        taper(sxw, p.shoulder.y, 6.8f, hx, hy, 6.4f, Tone.FACE)
-        // The neck gaiter, in the accent colour, with its tail streaming in the wind (the flag blows to the right).
-        run {
-            val gx = sxw + (hx - sxw) * 0.58f; val gy = p.shoulder.y + (hy - p.shoulder.y) * 0.58f
-            taper(sxw, p.shoulder.y, 8.6f, gx, gy, 8.2f, Tone.ACCENT)
-            val bx0 = sxw + (hx - sxw) * 0.30f - fx * 6.5f
-            val by0 = p.shoulder.y + (hy - p.shoulder.y) * 0.30f - fy * 6.5f
-            // The tail trails behind the climber (the wind from the flag's side only nudges it), and ripples.
-            val tail = FloatArray(10)
-            tail[0] = bx0; tail[1] = by0
-            val ph = p.clock * 6.3f + (if (c.dir > 0f) 0f else 1.4f)
-            val back = -c.dir
-            for (i in 1..4) {
-                tail[2 * i] = bx0 + back * i * 4.8f + 0.9f * i
-                tail[2 * i + 1] = by0 + i * 1.5f + sin(ph - i * 0.95f) * (0.6f + 0.8f * i)
-            }
-            inked(Tone.ACCENT, 4.2f, *tail)
-        }
+        val headK = 1.10f
         /** A point on the head: [a] forward from its centre, [b] up from it (the head's own frame, tipped with the gaze). */
-        fun hp(a: Float, b: Float) = Pt(hx + fx * a + vx * b, hy + fy * a + vy * b)
+        fun hp(a: Float, b: Float) = Pt(hx + headK * (fx * a + vx * b), hy + headK * (fy * a + vy * b))
         fun flat(vararg q: Pt): FloatArray {
             val o = FloatArray(q.size * 2)
             for (i in q.indices) { o[2 * i] = q[i].x; o[2 * i + 1] = q[i].y }
             return o
         }
-
-        // ---- Face: sculpted cheek, jaw, ear and a readable nose/mouth silhouette ----
-        circle(hx, hy, Rig.HEAD_R - 0.5f, Tone.FACE)
-        run {
-            // Ear sits just behind the cheek and is partly tucked under the helmet.
-            val ear = hp(-10.8f, -4.2f)
-            circle(ear.x, ear.y, 3.0f, Tone.FACE_SHADE)
-            val earInner = hp(-10.3f, -4.0f)
-            stroke(Tone.LIP, 0.8f, earInner.x - fx * 0.8f, earInner.y - fy * 0.8f, earInner.x + vx * 1.2f, earInner.y + vy * 1.2f)
-
-            // Nose bridge and rounded tip; the small nostril gives the profile a stronger silhouette.
-            val nb = hp(10.8f, -3.8f); val nt = hp(13.1f, -6.2f); val ns = hp(11.4f, -7.4f)
-            stroke(Tone.FACE_SHADE, 2.0f, nb.x, nb.y, nt.x, nt.y, ns.x, ns.y)
-            dot(nt.x, nt.y, 1.15f, Tone.FACE)
-            val nostril = hp(11.8f, -7.8f)
-            dot(nostril.x, nostril.y, 0.75f, Tone.LIP)
-
-            // A warm cheek plane and a soft highlight keep the face dimensional at small sizes.
-            val ch = hp(5.2f, -10.0f)
-            circle(ch.x, ch.y, 3.5f, Tone.FACE)
-            val ck = hp(2.2f, -7.5f)
-            dot(ck.x, ck.y, 3.2f, Tone.FACE_SHADE)
-            val bl = hp(6.5f, -5.8f)
-            dot(bl.x, bl.y, 2.1f, Tone.CHEEK)
-            val hi = hp(3.8f, -12.0f)
-            dot(hi.x, hi.y, 1.0f, Tone.SHINE)
-
-            // Defined upper and lower lip, with a subtle smile crease.
-            val m0 = hp(5.0f, -10.4f); val m1 = hp(6.8f, -10.9f); val m2 = hp(8.7f, -10.3f)
-            stroke(Tone.LIP, if (fem) 1.5f else 1.25f, m0.x, m0.y, m1.x, m1.y, m2.x, m2.y)
-            val ml = hp(6.9f, -11.8f)
-            stroke(Tone.FACE_SHADE, 0.7f, ml.x - fx, ml.y - fy, ml.x + fx * 1.2f, ml.y + fy * 1.2f)
-
-            // The chin strap follows the jaw instead of cutting across the face.
-            val c0 = hp(-1.5f, 1.5f); val c1 = hp(1.5f, -9f); val c2 = hp(7f, -12f)
-            stroke(Tone.GEAR, 1.3f, c0.x, c0.y, c1.x, c1.y, c2.x, c2.y)
-            stroke(Tone.METAL, 0.55f, c1.x, c1.y, c2.x, c2.y)
+        fun flatL(q: List<Pt>): FloatArray {
+            val o = FloatArray(q.size * 2)
+            for (i in q.indices) { o[2 * i] = q[i].x; o[2 * i + 1] = q[i].y }
+            return o
+        }
+        fun line(tone: Int, w: Float, vararg q: Pt) = out.prims.add(Prim(2, tone, flat(*q), w))
+        fun poly(tone: Int, vararg q: Pt) = out.prims.add(Prim(1, tone, flat(*q)))
+        fun sblob(tone: Int, halo: Float, vararg q: Pt) = blob(flat(*q), tone, halo)
+        fun dotAt(q: Pt, r: Float, tone: Int) = dot(q.x, q.y, r, tone)
+        /** A soft-edged disc: blush, light on the cheek. It fades out, so it blends instead of sitting on the face like a sticker. */
+        fun soft(q: Pt, r: Float, tone: Int) = out.prims.add(Prim(3, tone, floatArrayOf(q.x, q.y, r)))
+        /** A smooth ribbon around the spine [sp] with half-width [rd] at each point. */
+        fun ribbon(sp: List<Pt>, rd: FloatArray, tone: Int, halo: Float) {
+            val n = sp.size
+            val l = ArrayList<Pt>(n)
+            val r = ArrayList<Pt>(n)
+            for (i in 0 until n) {
+                val a = sp[maxOf(i - 1, 0)]; val b = sp[minOf(i + 1, n - 1)]
+                val dx = b.x - a.x; val dy = b.y - a.y
+                val len = hypot(dx, dy).coerceAtLeast(1e-3f)
+                val nx = -dy / len; val ny = dx / len
+                l.add(Pt(sp[i].x + nx * rd[i], sp[i].y + ny * rd[i]))
+                r.add(Pt(sp[i].x - nx * rd[i], sp[i].y - ny * rd[i]))
+            }
+            r.reverse()
+            blob(flatL(l + r), tone, halo)
         }
 
-        // A ponytail out of the back of the helmet (drawn before the shell, so the shell covers its root): it droops,
-        // tapers and swings with the stride. A lit strand runs along its top and a lime tie sits where it leaves the helmet.
+        // The neck sits in the shade under the jaw. The gaiter is a rolled band in the accent colour with a lit lip, and
+        // its tail streams behind the climber in the same wind as the flag.
+        taper(sxw, p.shoulder.y, 6.6f, hx - fx * 1.5f, hy - fy * 1.5f, 6.2f, Tone.SKIN_DEEP)
+        run {
+            val gx = sxw + (hx - sxw) * 0.52f; val gy = p.shoulder.y + (hy - p.shoulder.y) * 0.52f
+            taper(sxw, p.shoulder.y, 8.8f, gx, gy, 8.0f, Tone.ACCENT)
+            stroke(Tone.INK, 0.9f, gx - fx * 7.6f, gy - fy * 7.6f + 0.8f, gx + fx * 7.6f, gy + fy * 7.6f + 0.8f)
+            stroke(Tone.SHINE, 0.8f, gx - fx * 5f, gy - fy * 5f - 1.9f, gx + fx * 3f, gy + fy * 3f - 1.9f)
+            val bx0 = sxw + (hx - sxw) * 0.30f - fx * 6.5f
+            val by0 = p.shoulder.y + (hy - p.shoulder.y) * 0.30f - fy * 6.5f
+            val ph = p.clock * 6.3f + (if (c.dir > 0f) 0f else 1.4f)
+            val back = -c.dir
+            val tail = ArrayList<Pt>(6)
+            for (i in 0..5) tail.add(Pt(bx0 + back * i * 4.4f + 0.8f * i, by0 + i * 1.3f + sin(ph - i * 0.95f) * (0.5f + 0.75f * i)))
+            ribbon(tail, floatArrayOf(3.2f, 3.0f, 2.5f, 1.9f, 1.2f, 0.5f), Tone.ACCENT, HALO)
+            stroke(Tone.SHINE, 0.8f, tail[0].x, tail[0].y - 1.4f, tail[2].x, tail[2].y - 1.2f)
+        }
+
+        // A ponytail out of the back of the helmet (drawn before the head, so the helmet covers its root): one smooth
+        // shape that tapers and swings with the stride, a lit ribbon along its top and a lime tie at the root.
         if (fem) {
             val ph = p.clock * 6.3f + 0.8f
-            val cen = Array(7) { i ->
-                if (i == 0) hp(-13f, 3f)
-                else hp(-13f - 4.4f * i, 5f + 1.2f * i - 0.55f * i * i + sin(ph - i * 0.8f) * (0.5f + 0.9f * i))
+            val n = 8
+            val sp = ArrayList<Pt>(n)
+            for (i in 0 until n) {
+                sp.add(if (i == 0) hp(-12f, 2.5f) else hp(-11.5f - 4.0f * i, 4f + 1.9f * i - 0.7f * i * i + sin(ph - i * 0.8f) * (0.4f + 0.8f * i)))
             }
-            val rad = floatArrayOf(3.9f, 4.4f, 4.4f, 4.0f, 3.3f, 2.4f, 1.2f)
-            fun seg(i: Int, grow: Float, tone: Int) {
-                val a = cen[i]; val b = cen[i + 1]
-                val l = hypot(b.x - a.x, b.y - a.y).coerceAtLeast(1e-3f)
-                val nx = -(b.y - a.y) / l; val ny = (b.x - a.x) / l
-                val ra = rad[i] + grow; val rb = rad[i + 1] + grow
-                out.prims.add(Prim(1, tone, floatArrayOf(a.x + nx * ra, a.y + ny * ra, b.x + nx * rb, b.y + ny * rb, b.x - nx * rb, b.y - ny * rb, a.x - nx * ra, a.y - ny * ra)))
+            val rad = floatArrayOf(2.5f, 3.4f, 3.7f, 3.4f, 2.8f, 2.0f, 1.2f, 0.4f)
+            ribbon(sp, FloatArray(n) { rad[it] * headK * 0.95f }, Tone.HAIR, HALO)
+            val rib = FloatArray(2 * (n - 2))
+            for (i in 1 until n - 1) {
+                val a = sp[maxOf(i - 1, 0)]; val b = sp[minOf(i + 1, n - 1)]
+                val len = hypot(b.x - a.x, b.y - a.y).coerceAtLeast(1e-3f)
+                val nx = -(b.y - a.y) / len; val ny = (b.x - a.x) / len
+                rib[2 * (i - 1)] = sp[i].x + nx * rad[i] * headK * 0.43f
+                rib[2 * (i - 1) + 1] = sp[i].y + ny * rad[i] * headK * 0.43f
             }
-            for (i in 0 until 6) seg(i, HALO, Tone.INK)
-            for (i in 0..6) out.prims.add(Prim(0, Tone.INK, floatArrayOf(cen[i].x, cen[i].y, rad[i] + HALO)))
-            for (i in 0 until 6) seg(i, 0f, Tone.HAIR)
-            for (i in 0..6) out.prims.add(Prim(0, Tone.HAIR, floatArrayOf(cen[i].x, cen[i].y, rad[i])))
-            val strand = FloatArray(8)
-            for (i in 1..4) {
-                strand[2 * (i - 1)] = cen[i].x + vx * rad[i] * 0.45f
-                strand[2 * (i - 1) + 1] = cen[i].y + vy * rad[i] * 0.45f
-            }
-            stroke(Tone.HAIR_HI, 1.1f, *strand)
-            out.prims.add(Prim(0, Tone.ACCENT, floatArrayOf(cen[1].x, cen[1].y, 2.0f)))
+            stroke(Tone.HAIR_HI, 1.2f, *rib)
+            dotAt(sp[1], 2.6f, Tone.INK)
+            dotAt(sp[1], 1.8f, Tone.ACCENT)
         }
-        // The shadow the helmet throws on the brow (drawn first, so the shell covers its upper edge): a shape that
-        // follows the edge of the helmet and tapers away at both ends.
+
+        // ---- Head silhouette, then the shade under the jaw, the cheekbone light and the blush ----
+        sblob(
+            Tone.FACE, HALO,
+            hp(-13f, 3f), hp(-10.5f, 11f), hp(-2f, 14.5f), hp(8f, 13f), hp(13.2f, 7f),
+            hp(14.3f, 1.5f), hp(15.6f, -1.2f), hp(18.0f, -4.2f), hp(15.0f, -6.0f), // brow, nose bridge, tip, under the nose
+            hp(14.2f, -8.0f), hp(14.6f, -10.2f), hp(13.2f, -12.2f),                // lips
+            hp(9.5f, -14.8f), hp(3f, -15.2f), hp(-4f, -13.2f), hp(-10.5f, -8f), hp(-14f, -2f),
+        )
+        // Shade along the jaw and under the chin: it hugs the outline and tapers away at both ends, like the limb shading.
+        sblob(
+            Tone.FACE_SHADE, 0f,
+            hp(-12.9f, -2.8f), hp(-10.0f, -8.3f), hp(-4.0f, -12.5f), hp(3.0f, -14.2f), hp(9.2f, -13.7f),
+            hp(5.0f, -11.4f), hp(-1.5f, -10.0f), hp(-7.2f, -6.8f), hp(-11.2f, -2.0f),
+        )
+        // Soft light on the cheekbone, a soft blush below it, and a glint on the tip of the nose.
+        soft(hp(6.6f, -3.6f), 5.2f, Tone.SKIN_HI)
+        soft(hp(8.0f, -7.6f), 4.6f, Tone.CHEEK)
+        soft(hp(16.4f, -3.9f), 1.7f, Tone.SKIN_HI)
+        line(Tone.LIP, 0.8f, hp(15.6f, -5.2f), hp(14.7f, -5.7f))
+        // The ear, tucked under the helmet rim: an ear-shaped form with a shaded hollow, not a disc.
+        sblob(Tone.FACE, 1.8f, hp(-4.4f, -0.6f), hp(-7.4f, -0.4f), hp(-9.0f, -3.2f), hp(-8.0f, -6.6f), hp(-5.0f, -6.8f), hp(-3.8f, -3.6f))
+        sblob(Tone.FACE_SHADE, 0f, hp(-5.4f, -2.0f), hp(-7.2f, -2.3f), hp(-7.5f, -4.6f), hp(-5.8f, -5.3f))
+        // Lips: one smooth shape, a soft light on the lower lip, and a small crease at the corner of the smile.
+        sblob(Tone.LIP, 0f, hp(9.6f, -10.2f), hp(11.8f, -10.9f), hp(14.3f, -10.1f), hp(13.6f, -11.6f), hp(11.8f, -12.2f), hp(10.0f, -11.3f))
+        line(Tone.SKIN_DEEP, 0.7f, hp(9.9f, -10.9f), hp(12.2f, -11.3f), hp(14.1f, -10.3f))
+        soft(hp(11.9f, -11.8f), 1.9f, Tone.SKIN_HI)
+        line(Tone.FACE_SHADE, 0.8f, hp(8.9f, -9.2f), hp(8.4f, -10.3f), hp(8.9f, -11.2f))
+
+        // ---- Eye: an almond shape under a real upper lid (the lid covers the top of the iris), with a lash line ----
         run {
-            val ea = floatArrayOf(15f, 8f, 0f, -8f, -12.5f)
-            val eb = floatArrayOf(3f, 2.6f, 1.1f, -2.4f, -6.8f)
-            val cnt = ea.size
-            val pts = FloatArray(2 * (2 * cnt - 2))
-            for (i in 0 until cnt) {
-                val t = hp(ea[i], eb[i] + 1.6f)
-                pts[2 * i] = t.x; pts[2 * i + 1] = t.y
-                if (i in 1 until cnt - 1) {
-                    val bt = hp(ea[i], eb[i] - 1.9f * Math.pow(sin(PI * i / (cnt - 1)), 0.7).toFloat())
-                    val j = 2 * cnt - 2 - i
-                    pts[2 * j] = bt.x; pts[2 * j + 1] = bt.y
-                }
-            }
-            blob(pts, Tone.FACE_SHADE, halo = 0f)
+            sblob(Tone.EYE_W, 1.25f, hp(6.6f, -1.2f), hp(8.4f, 0.3f), hp(11.6f, 0.8f), hp(13.6f, -0.7f), hp(12.4f, -3.4f), hp(9.2f, -4.0f))
+            dotAt(hp(10.8f, -1.4f), 2.5f, Tone.IRIS)
+            soft(hp(10.9f, -2.7f), 1.7f, Tone.IRIS_HI)
+            dotAt(hp(11.1f, -1.4f), 1.3f, Tone.INK)
+            dotAt(hp(11.9f, -0.3f), 0.95f, Tone.SHINE)
+            dotAt(hp(10.0f, -2.7f), 0.45f, Tone.SHINE)
+            // The upper lid, in skin, over the top of the eye.
+            poly(Tone.FACE, hp(6.0f, -0.7f), hp(8.4f, 1.1f), hp(11.4f, 1.6f), hp(14.0f, 0.2f), hp(14.4f, 4.6f), hp(6.0f, 4.6f))
+            line(Tone.INK, 1.7f, hp(6.2f, -0.5f), hp(8.6f, 1.1f), hp(11.6f, 1.6f), hp(14.0f, 0.3f))
+            if (fem) line(Tone.INK, 1.0f, hp(13.6f, 0.5f), hp(15.3f, 1.9f))
+            // A brow that is thick in the middle and tapers at both ends.
+            sblob(
+                if (fem) Tone.HAIR_DEEP else Tone.INK, 0f,
+                hp(7.0f, 3.3f), hp(9.8f, 4.7f), hp(13.6f, 4.7f), hp(13.8f, 3.7f), hp(10.2f, 3.5f), hp(7.4f, 2.5f),
+            )
         }
-        // ---- An eye and a brow, looking up the slope ----
+
+        // ---- Hair that shows under the helmet at the nape, and a fringe tuft for her ----
+        if (!fem) {
+            sblob(Tone.HAIR, 1.8f, hp(-14.4f, -0.5f), hp(-13.6f, -7f), hp(-10.5f, -10.6f), hp(-8.6f, -8.2f), hp(-10.6f, -3.2f), hp(-12.6f, 1.6f))
+            poly(Tone.HAIR_HI, hp(-13.2f, -3.5f), hp(-11.8f, -7.6f), hp(-10.6f, -5.4f))
+        } else {
+            sblob(Tone.HAIR, 1.6f, hp(-14.2f, 0.5f), hp(-13.4f, -6f), hp(-10.2f, -9.6f), hp(-8.4f, -7f), hp(-10.4f, -2f), hp(-12.6f, 1.8f))
+            sblob(Tone.HAIR, 1.4f, hp(9.2f, 5.8f), hp(12.8f, 5.0f), hp(14.4f, 2.4f), hp(11.2f, 3.2f))
+        }
+
+        // ---- Chin strap along the jaw, with a small buckle ----
         run {
-            val e = hp(8.8f, -2.6f)
-            dot(e.x, e.y, 2.4f, Tone.INK)
-            dot(e.x, e.y, 1.75f, Tone.EYE_W)
-            val ir = hp(9.3f, -2.6f)
-            dot(ir.x, ir.y, 1.2f, Tone.INK)
-            val gl = hp(9.6f, -2.1f)
-            dot(gl.x, gl.y, 0.45f, Tone.SHINE)
-            val b0 = hp(5.8f, -0.2f); val b1 = hp(8.6f, 0.6f); val b2 = hp(11.2f, 0.0f)
-            stroke(if (fem) Tone.HAIR else Tone.INK, 1.3f, b0.x, b0.y, b1.x, b1.y, b2.x, b2.y)
-            if (fem) {
-                val la = hp(10.2f, -1.3f); val lb = hp(12.2f, -0.5f)
-                stroke(Tone.INK, 0.9f, la.x, la.y, lb.x, lb.y)
-            }
+            val c0 = hp(-3.2f, -6.4f); val c1 = hp(-1.2f, -11.4f); val c2 = hp(3.2f, -13.4f)
+            line(Tone.INK, 1.9f, c0, c1, c2)
+            line(Tone.GEAR, 1.1f, c0, c1, c2)
+            dotAt(hp(-1.0f, -11.6f), 1.25f, Tone.METAL)
         }
-        // ---- Helmet: a rounded shell that wraps the back of the head, with the brim built into the front ----
+
+        // ---- Helmet: a smooth dome with a lime stripe, vents, a rim band, the brim and a rear dial ----
         blob(
             flat(
-                hp(-14.2f, -9f), hp(-16f, 0f), hp(-14f, 8.5f), hp(-8f, 14.2f), hp(0f, 16.4f), hp(8f, 14.8f),
-                hp(13.8f, 10.2f), hp(19f, 6.8f), hp(18f, 4.2f), hp(8f, 3.0f), hp(0f, 1.5f), hp(-8f, -2f), hp(-12.5f, -7f),
+                hp(-15.2f, -6f), hp(-17.2f, 3f), hp(-14.6f, 11f), hp(-6f, 17.6f), hp(4f, 19.4f), hp(12.8f, 16.4f), hp(18.6f, 10.6f),
+                hp(23.6f, 8.6f), hp(22.4f, 5.4f), hp(10f, 4.8f), hp(0f, 3.6f), hp(-8.5f, 0.4f), hp(-13f, -3.4f),
             ),
             Tone.HELMET,
         )
-        // The lower back of the shell and the underside of the brim, in shade.
-        out.prims.add(Prim(1, Tone.HELMET_SHADE, flat(hp(-14f, -8f), hp(-15.6f, 0.5f), hp(-13.4f, 8f), hp(-9f, 11.6f), hp(-8.5f, 6f), hp(-10.5f, -1f), hp(-12f, -6f))))
-        out.prims.add(Prim(1, Tone.HELMET_SHADE, flat(hp(19f, 6.8f), hp(18f, 4.2f), hp(8f, 3.0f), hp(8.5f, 5.2f), hp(14f, 6.6f))))
-        // A lime rim just inside the lower edge: the same accent as the flag.
+        // The shaded lower back of the shell and the underside of the brim.
+        poly(Tone.HELMET_SHADE, hp(-15.2f, -6f), hp(-17.2f, 3f), hp(-14.6f, 11f), hp(-9.5f, 14.2f), hp(-10.8f, 6f), hp(-12.2f, -0.6f), hp(-13f, -4.8f))
+        poly(Tone.HELMET_SHADE, hp(23.6f, 8.6f), hp(22.4f, 5.4f), hp(10f, 4.8f), hp(10.5f, 7f), hp(18f, 7.6f))
+        // A darker rim band along the lower edge, with the lime stripe above it (the stripe follows the theme's accent).
+        line(Tone.HELMET_RIM, 2.2f, hp(20.8f, 6.8f), hp(10f, 5.4f), hp(0f, 4.2f), hp(-8f, 1.0f), hp(-13f, -3.0f))
+        line(Tone.ACCENT, 2.0f, hp(18.4f, 8.6f), hp(9f, 7.0f), hp(-0.5f, 6.0f), hp(-8.2f, 3.4f), hp(-14f, -1.4f))
+        // Vents over the crown.
+        line(Tone.HELMET_SHADE, 2.3f, hp(-1f, 15.2f), hp(4.4f, 15.6f))
+        line(Tone.HELMET_SHADE, 2.3f, hp(-7f, 13.6f), hp(-1.8f, 14.2f))
+        line(Tone.HELMET_SHADE, 2.3f, hp(6.4f, 14.0f), hp(10.6f, 12.6f))
+        // The sheen: a bright crescent on the upper front (the light comes from above and ahead), and a spot on the back.
+        poly(Tone.SHINE, hp(-1.5f, 17.4f), hp(5.5f, 17.4f), hp(12f, 14.6f), hp(14.2f, 12.4f), hp(8.4f, 14.6f), hp(2f, 15.8f))
+        dotAt(hp(-9.5f, 13.2f), 1.4f, Tone.SHINE)
+        // The rear tension dial.
         run {
-            val r0 = hp(15.5f, 5.6f); val r1 = hp(8f, 5.2f); val r2 = hp(0f, 3.6f); val r3 = hp(-8f, 0.4f); val r4 = hp(-13f, -5.2f)
-            stroke(Tone.ACCENT, 1.9f, r0.x, r0.y, r1.x, r1.y, r2.x, r2.y, r3.x, r3.y, r4.x, r4.y)
+            val d = hp(-15f, 5f)
+            dot(d.x, d.y, 2.6f, Tone.INK)
+            dot(d.x, d.y, 1.7f, Tone.METAL)
         }
-        // ---- Goggles pushed up onto the helmet (so the eyes show): a strap round the shell and a lens on the front ----
+
+        // ---- Goggles pushed up on the helmet: a strap round the shell, a dark frame and a tinted lens with a reflection ----
         run {
-            val s0 = hp(10.5f, 6.4f); val s1 = hp(1f, 5.2f); val s2 = hp(-7f, 2.6f); val s3 = hp(-13.2f, -1.6f)
-            stroke(Tone.GOGGLE, 2.2f, s0.x, s0.y, s1.x, s1.y, s2.x, s2.y, s3.x, s3.y)
-            val g1 = hp(9.0f, 7.8f); val g2 = hp(2.5f, 9.0f)
-            inked(Tone.GOGGLE, 6.4f, g1.x, g1.y, g2.x, g2.y)
-            stroke(Tone.LENS, 4.2f, g1.x, g1.y, g2.x, g2.y)
-            val l0 = hp(7.6f, 8.6f); val l1 = hp(3.8f, 9.4f)
-            stroke(Tone.SHINE, 1.0f, l0.x, l0.y, l1.x, l1.y)
-        }
-        // A highlight on the shell, from the same light (up and ahead).
-        run {
-            val hi = hp(-4f, 12.8f)
-            dot(hi.x, hi.y, 2.4f, Tone.SHINE)
+            line(Tone.GOGGLE, 2.2f, hp(11f, 9.6f), hp(1f, 9.2f), hp(-8f, 6.2f), hp(-15.2f, 2.2f))
+            val g1 = hp(10.4f, 10.9f); val g2 = hp(2.4f, 11.4f)
+            inked(Tone.GOGGLE, 6.6f, g1.x, g1.y, g2.x, g2.y)
+            stroke(Tone.LENS, 4.6f, g1.x, g1.y, g2.x, g2.y)
+            stroke(Tone.LENS_HI, 2.0f, g1.x - fx * 0.3f, g1.y - fy * 0.3f, g2.x, g2.y)
+            val l0 = hp(8.6f, 11.9f); val l1 = hp(5.2f, 12.3f)
+            line(Tone.SHINE, 1.0f, l0, l1)
         }
 
         // ---- An ice axe in the near hand: the shaft runs on from the forearm, and the pick bites down into the

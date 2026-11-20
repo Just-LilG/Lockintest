@@ -1,11 +1,14 @@
 package com.godbless.lockin.data
 
+import com.godbless.lockin.study.AskContext
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
 /** A textbook page for the AI: which book, its page number (from 1), and a JPEG of it in base64. */
 class AiPage(val book: String, val page: Int, val image: String)
+
+class AiDigest(val summary: String, val glossary: List<Pair<String, String>>)
 
 class AiQuestion(val question: String, val options: List<String>, val answer: Int, val why: String, val page: Int)
 class AiCard(val question: String, val answer: String, val page: Int)
@@ -106,18 +109,53 @@ class AiRepository(private val partners: PartnerRepository) {
      * [mode] is "explain", "simpler", "example" or "ask" (with [question]). [prior] is what was already said, so a
      * follow-up builds on it instead of repeating it.
      */
-    suspend fun passage(page: AiPage, snip: String, mode: String = "explain", question: String = "", prior: String = ""): Result<AiPassage> = partners.attempt {
+    /**
+     * [ctx] is what the app knows about the book beyond the pictures (page text, related passages, notes, what the student
+     * misses); [level] is which hint of three when [mode] is "hint". Both are optional and the server copes without them.
+     */
+    internal suspend fun passage(
+        page: AiPage,
+        snip: String,
+        mode: String = "explain",
+        question: String = "",
+        prior: String = "",
+        ctx: AskContext? = null,
+        level: Int = 1,
+    ): Result<AiPassage> = partners.attempt {
         val j = ask("passage", listOf(page)) {
             put("snip", snip)
             put("mode", mode)
             if (question.isNotBlank()) put("question", question)
             if (prior.isNotBlank()) put("prior", prior.take(1400))
+            if (mode == "hint") put("level", level)
+            if (ctx != null && !ctx.isEmpty()) {
+                put("ctx", JSONObject().apply {
+                    if (ctx.ptext.isNotBlank()) put("ptext", ctx.ptext)
+                    if (ctx.prev.isNotBlank() || ctx.next.isNotBlank()) put("near", JSONObject().put("prev", ctx.prev).put("next", ctx.next))
+                    if (ctx.refs.isNotEmpty()) put("refs", JSONArray().also { a -> ctx.refs.forEach { r -> a.put(JSONObject().put("page", r.page).put("text", r.text)) } })
+                    if (ctx.notes.isNotBlank()) put("notes", ctx.notes)
+                    if (ctx.weak.isNotEmpty()) put("weak", JSONArray(ctx.weak))
+                })
+            }
         }
         val t = j.optJSONArray("terms") ?: JSONArray()
         AiPassage(
             j.optString("text"), j.optString("meaning"), j.optString("context"), j.optString("example"),
             List(t.length()) { t.getJSONObject(it).let { o -> o.optString("term") to o.optString("meaning") } }.filter { it.first.isNotBlank() },
             j.optString("answer"),
+        )
+    }
+
+    /** Notes about a whole book from samples of its text (page number, text): a summary and key terms. No pictures. */
+    suspend fun digest(book: String, texts: List<Pair<Int, String>>): Result<AiDigest> = partners.attempt {
+        val j = ask("digest", emptyList()) {
+            put("book", book.take(80))
+            put("texts", JSONArray().also { a -> texts.forEach { (p, t) -> a.put(JSONObject().put("page", p).put("text", t.take(800))) } })
+        }
+        val g = j.optJSONArray("glossary") ?: JSONArray()
+        AiDigest(
+            j.optString("summary"),
+            List(g.length()) { g.getJSONObject(it).let { o -> o.optString("term") to o.optString("meaning") } }.filter { it.first.isNotBlank() },
         )
     }
 }
